@@ -15,5 +15,6 @@
   </Folder>
   <Folder Name="/tests/">
     <Project Path="tests/BTHaven.Core.Tests/BTHaven.Core.Tests.csproj" />
+    <Project Path="tests/BTHaven.IntegrationTests/BTHaven.IntegrationTests.csproj" />
   </Folder>
 </Solution>

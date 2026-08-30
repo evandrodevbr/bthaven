@@ -6,6 +6,16 @@ public enum AudioEndpointDirection
     Capture,
 }
 
+public enum MediaAudioSinkState
+{
+    Disabled,
+    Starting,
+    Started,
+    Opening,
+    Opened,
+    Failed,
+}
+
 public sealed record AudioEndpointModel
 {
     public required string Id { get; init; }

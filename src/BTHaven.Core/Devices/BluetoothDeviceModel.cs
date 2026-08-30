@@ -20,6 +20,19 @@ public enum BluetoothTransport
     DualMode,
 }
 
+public enum BluetoothDeviceCategory
+{
+    Unknown,
+    Smartphone,
+    Headphones,
+    Speaker,
+    Mouse,
+    Keyboard,
+    Controller,
+    Peripheral,
+    Other,
+}
+
 public sealed record BluetoothDeviceModel
 {
     public required string Id { get; init; }
@@ -29,12 +42,15 @@ public sealed record BluetoothDeviceModel
     public string? Model { get; init; }
     public string? Address { get; init; }
     public BluetoothTransport Transport { get; init; }
+    public BluetoothDeviceCategory Category { get; init; }
     public bool IsPaired { get; init; }
     public bool IsConnected { get; init; }
     public bool IsPresent { get; init; }
     public int? Rssi { get; init; }
     public Battery.BatteryState? Battery { get; init; }
     public BluetoothCapabilities Capabilities { get; init; }
+    public IReadOnlyList<string> Services { get; init; } = [];
+    public IReadOnlyList<string> Profiles { get; init; } = [];
     public DateTimeOffset LastUpdated { get; init; } = DateTimeOffset.UtcNow;
 }
 

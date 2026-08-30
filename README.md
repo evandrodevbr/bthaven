@@ -12,7 +12,7 @@
 
 The project is intentionally evidence-driven. Features that depend on restricted, undocumented, or profile-specific Windows behavior are preceded by executable probes. The HFP call path is a hard architecture gate: the application will not pretend to support phone calls until the Windows role and transport have been demonstrated with code and a real device.
 
-> **Status:** Phase 0 in progress. Device enumeration, battery, A2DP sink, HFP transport discovery, and Core Audio probes live under [`probes/`](probes/). The complete WinUI 3 shell is deliberately deferred until the HFP feasibility gate is answered.
+> **Status:** Phase 1–3 groundwork is implemented. Device enumeration, layered battery providers, A2DP service state, endpoint inventory, HFP transport discovery, and Core Audio probes are available. The complete WinUI 3 shell and HFP call path remain gated by physical-device evidence.
 
 ## Scope
 
@@ -22,6 +22,7 @@ The project is intentionally evidence-driven. Features that depend on restricted
 - Windows `AudioPlaybackConnection` A2DP sink investigation;
 - WASAPI/Core Audio endpoint inventory and routing groundwork;
 - HFP feasibility investigation with public API and capability evidence;
+- `BluetoothDeviceManager`, Windows/GATT battery providers, `A2dpSinkService`, and WASAPI endpoint enumeration;
 - local-only operation, structured logs, and privacy-preserving diagnostics.
 
 The intended application stack is C# / .NET 10 / WinUI 3 / Windows App SDK, with C++/WinRT or Win32/COM isolated behind interfaces if the public managed surface is insufficient.
@@ -87,7 +88,7 @@ Do not paste raw probe logs into public issues without removing device IDs, Blue
 src/
  ├── BTHaven.App/          # WinUI 3 shell; created after the architecture gate
  ├── BTHaven.Core/         # UI-free domain models and contracts
- ├── BTHaven.Windows/      # Windows/WinRT/Core Audio adapters
+ ├── BTHaven.Windows/      # Windows/WinRT/Core Audio adapters and services
  └── BTHaven.Native/       # optional native boundary, only when evidence requires it
 
 tests/

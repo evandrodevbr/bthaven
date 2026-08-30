@@ -34,6 +34,13 @@ The initial domain surface defines the seams needed by the requested product wit
 - `IAudioRouter`
 - `IAudioProcessingPipeline`
 
+## Implemented Windows adapters
+
+- `BluetoothDeviceManager` maintains paired Classic and BLE `DeviceWatcher` instances, groups endpoint observations by `ContainerId`, and keeps `paired`, `present`, and `connected` independent. Its default query is the connected filter; callers can request every supported filter.
+- `WindowsBatteryService` composes `WindowsDevicePropertiesBatteryProvider` and `GattBatteryProvider`. The GATT provider supports one-shot reads and notification subscriptions for `0x180F` / `0x2A19` when the device exposes a readable/notify characteristic.
+- `A2dpSinkService` wraps `AudioPlaybackConnection` and exposes explicit `Starting`, `Started`, `Opening`, `Opened`, and `Failed` states. It does not claim success when `TryCreateFromId` returns `null` or `OpenAsync` reports failure.
+- `AudioEndpointManager` enumerates active WASAPI render/capture endpoints and stable endpoint IDs. It is an inventory adapter; it does not change the Windows default endpoint or introduce a virtual driver.
+
 ## Device state model
 
 `paired`, `present`, and `connected` are separate observations. A paired device can be absent. A present device can be disconnected. A connected device can expose a different set of profile endpoints than the base association endpoint.
@@ -51,6 +58,8 @@ PC microphone ── WASAPI ──> HFP uplink (gate)
 ```
 
 The A2DP path is documented by Microsoft as a supported remote-audio playback scenario. That does not prove that a desktop app can register a generic HFP Hands-Free Unit. HFP remains a separate feasibility question and an explicit gate.
+
+The current Windows implementation intentionally stops at the public boundary: endpoint selection for `AudioPlaybackConnection` and generic phone HFP registration still require separate evidence. No UI state is allowed to turn those unresolved paths into a false-positive capability.
 
 ## Battery provider order
 

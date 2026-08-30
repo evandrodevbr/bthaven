@@ -7,7 +7,7 @@ namespace BTHaven.Core.Contracts;
 public interface IBluetoothDeviceService
 {
     Task<IReadOnlyList<BluetoothDeviceModel>> GetDevicesAsync(
-        BluetoothDeviceFilter filter = BluetoothDeviceFilter.All,
+        BluetoothDeviceFilter filter = BluetoothDeviceFilter.Connected,
         CancellationToken cancellationToken = default);
 
     IAsyncEnumerable<BluetoothDeviceChange> WatchAsync(
@@ -33,6 +33,10 @@ public interface IBatteryService
 public interface IMediaAudioSink
 {
     bool IsEnabled { get; }
+    string? DeviceId { get; }
+    MediaAudioSinkState State { get; }
+    Task<bool> ConnectAsync(string deviceId, CancellationToken cancellationToken = default);
+    Task DisconnectAsync(CancellationToken cancellationToken = default);
     Task EnableAsync(string deviceId, CancellationToken cancellationToken = default);
     Task DisableAsync(CancellationToken cancellationToken = default);
 }
