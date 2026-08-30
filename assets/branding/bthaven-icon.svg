@@ -1,0 +1,20 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" role="img" aria-labelledby="title">
+  <title id="title">BTHaven icon</title>
+  <defs>
+    <linearGradient id="bg" x1="24" y1="20" x2="232" y2="238" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#0B2036"/>
+      <stop offset="1" stop-color="#0A5B91"/>
+    </linearGradient>
+    <linearGradient id="signal" x1="67" y1="56" x2="195" y2="203" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#B1F6FF"/>
+      <stop offset="1" stop-color="#2C9BFF"/>
+    </linearGradient>
+  </defs>
+  <rect x="12" y="12" width="232" height="232" rx="58" fill="url(#bg)"/>
+  <circle cx="128" cy="128" r="88" fill="none" stroke="#8CEBFF" stroke-opacity=".25" stroke-width="7"/>
+  <path d="M128 48v160M128 48l58 50-58 30 58 30-58 50M128 128l-58-45M128 128l-58 45" fill="none" stroke="url(#signal)" stroke-linecap="round" stroke-linejoin="round" stroke-width="14"/>
+  <circle cx="128" cy="48" r="9" fill="#FFF"/>
+  <circle cx="186" cy="98" r="9" fill="#FFF"/>
+  <circle cx="186" cy="158" r="9" fill="#FFF"/>
+  <circle cx="128" cy="208" r="9" fill="#FFF"/>
+</svg>

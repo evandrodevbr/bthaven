@@ -1,0 +1,19 @@
+<Solution>
+  <Folder Name="/probes/">
+    <Project Path="probes/01-device-enumeration/01-device-enumeration.csproj" />
+    <Project Path="probes/02-battery/02-battery.csproj" />
+    <Project Path="probes/03-a2dp-sink/03-a2dp-sink.csproj" />
+    <Project Path="probes/04-phone-hfp/04-phone-hfp.csproj" />
+    <Project Path="probes/05-call-audio-routing/05-call-audio-routing.csproj" />
+  </Folder>
+  <Folder Name="/probes/Common/">
+    <Project Path="probes/Common/BTHaven.Probes.Common.csproj" />
+  </Folder>
+  <Folder Name="/src/">
+    <Project Path="src/BTHaven.Core/BTHaven.Core.csproj" />
+    <Project Path="src/BTHaven.Windows/BTHaven.Windows.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/BTHaven.Core.Tests/BTHaven.Core.Tests.csproj" />
+  </Folder>
+</Solution>

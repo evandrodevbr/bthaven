@@ -1,0 +1,27 @@
+# .NET
+**/bin/
+**/obj/
+.vs/
+*.user
+*.suo
+*.userosscache
+*.sln.docstates
+
+# Build and probe output
+artifacts/
+*.nupkg
+TestResults/
+
+# Local SDKs and developer tools
+.dotnet/
+.nuget/
+
+# IDEs and OS files
+.vscode/settings.json
+.idea/
+.DS_Store
+Thumbs.db
+
+# Diagnostics that may contain device identifiers
+*.trace.jsonl
+*.probe.log

@@ -1,0 +1,12 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0-windows10.0.26100.0</TargetFramework>
+    <RootNamespace>BTHaven.Probes.DeviceEnumeration</RootNamespace>
+    <AssemblyName>BTHaven.Probe.DeviceEnumeration</AssemblyName>
+    <SupportedOSPlatformVersion>10.0.22621.0</SupportedOSPlatformVersion>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="../Common/BTHaven.Probes.Common.csproj" />
+  </ItemGroup>
+</Project>

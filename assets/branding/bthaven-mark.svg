@@ -1,0 +1,24 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-labelledby="title desc">
+  <title id="title">BTHaven mark</title>
+  <desc id="desc">A Bluetooth glyph surrounded by a calm blue harbor orbit.</desc>
+  <defs>
+    <linearGradient id="bg" x1="70" y1="55" x2="440" y2="465" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#0B2036"/>
+      <stop offset="1" stop-color="#082A43"/>
+    </linearGradient>
+    <linearGradient id="signal" x1="122" y1="110" x2="391" y2="399" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#76E7FF"/>
+      <stop offset="1" stop-color="#1D8DFF"/>
+    </linearGradient>
+  </defs>
+  <rect x="24" y="24" width="464" height="464" rx="116" fill="url(#bg)"/>
+  <circle cx="256" cy="256" r="174" fill="none" stroke="#76E7FF" stroke-opacity=".14" stroke-width="20"/>
+  <circle cx="256" cy="256" r="138" fill="none" stroke="#76E7FF" stroke-opacity=".20" stroke-width="4" stroke-dasharray="12 20"/>
+  <path d="M256 105v302M256 105l105 91-105 60 105 60-105 91M256 256l-106-84M256 256l-106 84" fill="none" stroke="url(#signal)" stroke-linecap="round" stroke-linejoin="round" stroke-width="26"/>
+  <circle cx="256" cy="105" r="17" fill="#F8FDFF"/>
+  <circle cx="361" cy="196" r="17" fill="#F8FDFF"/>
+  <circle cx="361" cy="316" r="17" fill="#F8FDFF"/>
+  <circle cx="256" cy="407" r="17" fill="#F8FDFF"/>
+  <circle cx="150" cy="172" r="13" fill="#A6F3FF"/>
+  <circle cx="150" cy="340" r="13" fill="#A6F3FF"/>
+</svg>
