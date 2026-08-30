@@ -1,4 +1,7 @@
 <Solution>
+  <Configurations>
+    <Platform Name="x64" />
+  </Configurations>
   <Folder Name="/probes/">
     <Project Path="probes/01-device-enumeration/01-device-enumeration.csproj" />
     <Project Path="probes/02-battery/02-battery.csproj" />
@@ -10,6 +13,9 @@
     <Project Path="probes/Common/BTHaven.Probes.Common.csproj" />
   </Folder>
   <Folder Name="/src/">
+    <Project Path="src/BTHaven.App/BTHaven.App.csproj">
+      <Platform Project="x64" />
+    </Project>
     <Project Path="src/BTHaven.Core/BTHaven.Core.csproj" />
     <Project Path="src/BTHaven.Windows/BTHaven.Windows.csproj" />
   </Folder>

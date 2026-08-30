@@ -1,0 +1,10 @@
+{
+  "profiles": {
+    "BTHaven.App (Package)": {
+      "commandName": "MsixPackage"
+    },
+    "BTHaven.App (Unpackaged)": {
+      "commandName": "Project"
+    }
+  }
+}

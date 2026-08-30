@@ -54,14 +54,14 @@ A per-user .NET SDK is sufficient; no system-wide SDK installation is required. 
 
 ```powershell
 dotnet restore BTHaven.slnx
-dotnet build BTHaven.slnx -c Release
+dotnet build BTHaven.slnx -c Release -p:Platform=x64
 ```
 
 From Git Bash, if the SDK was installed per-user:
 
 ```bash
 export PATH="$HOME/.dotnet:$PATH"
-dotnet build BTHaven.slnx -c Release
+dotnet build BTHaven.slnx -c Release -p:Platform=x64
 ```
 
 Run the probes individually so their output can be inspected:
