@@ -7,14 +7,17 @@ public sealed class BatteryService : IBatteryService
 {
     private readonly IReadOnlyList<IBatteryProvider> providers;
     private readonly Action<string, Exception>? providerError;
+    private readonly Action<string, BatteryState>? providerResult;
 
     public BatteryService(
         IEnumerable<IBatteryProvider> providers,
-        Action<string, Exception>? providerError = null)
+        Action<string, Exception>? providerError = null,
+        Action<string, BatteryState>? providerResult = null)
     {
         ArgumentNullException.ThrowIfNull(providers);
         this.providers = providers.ToArray();
         this.providerError = providerError;
+        this.providerResult = providerResult;
     }
 
     public async Task<BatteryState> GetBatteryAsync(
@@ -29,6 +32,7 @@ public sealed class BatteryService : IBatteryService
             try
             {
                 var state = await provider.GetBatteryAsync(device, cancellationToken).ConfigureAwait(false);
+                providerResult?.Invoke(provider.Name, state);
                 if (state.Percentage.HasValue || state.IsCharging.HasValue)
                 {
                     return state;

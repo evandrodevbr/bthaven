@@ -10,6 +10,7 @@ using Microsoft.UI.Xaml.Input;
 using Microsoft.UI.Xaml.Media;
 using Microsoft.UI.Xaml.Navigation;
 using Microsoft.UI.Xaml.Shapes;
+using BTHaven.Windows.Diagnostics;
 
 // To learn more about WinUI, the WinUI project structure,
 // and more about our project templates, see: http://aka.ms/winui-project-info.
@@ -22,6 +23,7 @@ namespace BTHaven_App;
 public partial class App : Application
 {
     private Window? _window;
+    private readonly TraceDiagnosticLogger logger = TraceDiagnosticLogger.Instance;
     /// <summary>
     /// Initializes the singleton application object.  This is the first line of authored code
     /// executed, and as such is the logical equivalent of main() or WinMain().
@@ -29,6 +31,7 @@ public partial class App : Application
     public App()
     {
         InitializeComponent();
+        logger.Info("App.Created");
     }
 
     /// <summary>
@@ -37,6 +40,7 @@ public partial class App : Application
     /// <param name="args">Details about the launch request and process.</param>
     protected override void OnLaunched(Microsoft.UI.Xaml.LaunchActivatedEventArgs args)
     {
+        logger.Info("App.Launched");
         _window = new MainWindow();
         _window.Activate();
     }

@@ -9,7 +9,7 @@ This table is deliberately conservative. A capability is not added to the future
 | `phoneLineTransportManagement` | `PhoneLineTransportDevice.RequestAccessAsync`, registration/transport management | Microsoft lists it under **Restricted capabilities** and the API references explicitly require it for access/registration | `SUPPORTED_RESTRICTED` |
 | `phoneCall` | phone-call related APIs | not inferred from Phone Link; no exact Phase 0 API use justifies requesting it | `UNKNOWN` |
 | `phoneCallHistory` / `phoneCallHistorySystem` | call history APIs | outside the Phase 0 minimum; do not request | `UNKNOWN` |
-| MSIX / package identity | restricted capability declarations and future WinUI 3 deployment | the official capability guidance describes capability declarations for packaged apps; no packaged BTHaven probe has been installed yet | `UNKNOWN` |
+| MSIX / package identity | restricted capability declarations and WinUI 3 deployment | the packaged BTHaven shell launches through the Windows App SDK `dotnet run` path; restricted HFP access remains separately denied | `SUPPORTED_WITH_PACKAGING` for deployment; HFP authorization remains `UNKNOWN` |
 | Unpackaged WinUI runtime | Windows App SDK shell | official deployment guidance requires runtime/bootstrapper handling for unpackaged apps; HFP capability authorization was not proven by this console run | `SUPPORTED_WITH_PACKAGING` for the deployment mechanism; HFP authorization remains `UNKNOWN` |
 | Administrator | normal inventory/A2DP/HFP public API use | no administrator assumption is made | `UNKNOWN` |
 | driver signing | custom Bluetooth profile or virtual audio driver | not part of the public managed probe; only considered if evidence requires it | `REQUIRES_DRIVER` for that alternative, not for the current MVP path |
@@ -19,8 +19,9 @@ This table is deliberately conservative. A capability is not added to the future
 - The Windows Runtime type `PhoneLineTransportDevice` was present on Windows build `10.0.26200`.
 - `CallsPhoneContract` version 5 was reported present.
 - `PhoneLineTransportDevice.GetDeviceSelector()` returned a selector.
-- No `PhoneLineTransportDevice` target was exposed on the current user/system state, so `RequestAccessAsync`, `RegisterApp`, and `ConnectAsync` were not invoked and no HRESULT denial was produced.
-- This is not proof that a generic HFP Hands-Free Unit is available to third-party desktop apps.
+- One concrete `PhoneLineTransportDevice` target was exposed for the paired Android phone; it reported `CanRouteToLocalDevice` and in-band ringing.
+- `RequestAccessAsync` returned `DeniedBySystem`; `RegisterApp` raised `UnauthorizedAccessException` with `HRESULT 0x80070005`.
+- `ConnectAsync` was not reached after access/registration denial. This is not proof that a generic HFP Hands-Free Unit is available to third-party desktop apps.
 
 ## Rules
 

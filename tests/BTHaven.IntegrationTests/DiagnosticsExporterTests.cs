@@ -21,6 +21,7 @@ public sealed class DiagnosticsExporterTests
             Assert.True(File.Exists(path));
             using var archive = ZipFile.OpenRead(path);
             Assert.Contains(archive.Entries, entry => entry.FullName == "diagnostics.json");
+            Assert.Contains(archive.Entries, entry => entry.FullName == "logs.jsonl");
             Assert.Contains(archive.Entries, entry => entry.FullName == "README.txt");
             Assert.DoesNotContain(archive.Entries, entry => entry.FullName.Contains("audio", StringComparison.OrdinalIgnoreCase));
 

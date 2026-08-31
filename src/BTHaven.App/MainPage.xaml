@@ -13,7 +13,7 @@
         <Style x:Key="SectionHeading" TargetType="TextBlock">
             <Setter Property="FontSize" Value="16" />
             <Setter Property="FontWeight" Value="SemiBold" />
-            <Setter Property="Margin" Value="0,10,0,2" />
+            <Setter Property="Margin" Value="0,12,0,2" />
         </Style>
         <Style x:Key="CaptionText" TargetType="TextBlock">
             <Setter Property="Opacity" Value="0.68" />
@@ -21,13 +21,13 @@
         </Style>
     </Page.Resources>
 
-    <Grid Padding="24,14,24,24" RowSpacing="18">
-        <Grid Grid.Row="0" ColumnDefinitions="*,Auto" VerticalAlignment="Center">
-            <StackPanel Spacing="3">
+    <Grid Padding="28,20,28,28" RowDefinitions="Auto,*" RowSpacing="20">
+        <Grid Grid.Row="0" ColumnDefinitions="*,Auto" ColumnSpacing="24" VerticalAlignment="Center">
+            <StackPanel Spacing="4">
                 <TextBlock Text="Bluetooth Hub" FontSize="30" FontWeight="SemiBold" />
-                <TextBlock Text="Dispositivos locais, estados reais e áudio sem nuvem" Opacity="0.72" />
+                <TextBlock Text="Controle local de dispositivos Bluetooth e áudio" Opacity="0.72" />
             </StackPanel>
-            <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
+            <StackPanel Grid.Column="1" Orientation="Horizontal" HorizontalAlignment="Right" Spacing="10" Margin="0,0,8,0">
                 <ComboBox x:Name="FilterComboBox" Width="170" SelectionChanged="FilterComboBox_SelectionChanged">
                     <ComboBoxItem Content="Todos" Tag="All" />
                     <ComboBoxItem Content="Conectados" Tag="Connected" />
@@ -38,20 +38,21 @@
                     <ComboBoxItem Content="Smartphones" Tag="Smartphones" />
                     <ComboBoxItem Content="Periféricos" Tag="Peripherals" />
                 </ComboBox>
+                <Button x:Name="LogsButton" Content="Logs" Click="LogsButton_Click" />
                 <Button x:Name="DiagnosticsButton" Content="Diagnósticos" Click="DiagnosticsButton_Click" />
                 <Button x:Name="RefreshButton" Content="Atualizar" Click="RefreshButton_Click" />
             </StackPanel>
         </Grid>
 
-        <Grid Grid.Row="1" ColumnDefinitions="350,*" ColumnSpacing="18">
-            <Border Grid.Column="0" Background="{StaticResource SubtlePanelBrush}" BorderBrush="{StaticResource PanelBorderBrush}" BorderThickness="1" CornerRadius="12" Padding="6">
+        <Grid Grid.Row="1" ColumnDefinitions="340,*" ColumnSpacing="18">
+            <Border Grid.Column="0" Background="{StaticResource SubtlePanelBrush}" BorderBrush="{StaticResource PanelBorderBrush}" BorderThickness="1" CornerRadius="12">
                 <Grid RowDefinitions="Auto,*">
-                    <Grid Padding="14,10,14,8" ColumnDefinitions="*,Auto">
+                    <Grid Padding="18,16,18,12" ColumnDefinitions="*,Auto">
                         <TextBlock Text="Dispositivos" FontSize="18" FontWeight="SemiBold" />
                         <TextBlock x:Name="DeviceCountText" Grid.Column="1" Style="{StaticResource CaptionText}" VerticalAlignment="Center" />
                     </Grid>
                     <Grid Grid.Row="1">
-                        <ListView x:Name="DeviceList" SelectionMode="Single" SelectionChanged="DeviceList_SelectionChanged">
+                        <ListView x:Name="DeviceList" Margin="6,0,6,6" SelectionMode="Single" SelectionChanged="DeviceList_SelectionChanged">
                             <ListView.ItemTemplate>
                                 <DataTemplate>
                                     <Grid Padding="10" ColumnDefinitions="38,*,Auto" ColumnSpacing="10">
@@ -66,26 +67,26 @@
                                 </DataTemplate>
                             </ListView.ItemTemplate>
                         </ListView>
-                        <StackPanel x:Name="EmptyState" HorizontalAlignment="Center" VerticalAlignment="Center" Spacing="8" MaxWidth="250">
-                            <FontIcon Glyph="&#xE702;" FontSize="32" HorizontalAlignment="Center" Opacity="0.6" />
+                        <StackPanel x:Name="EmptyState" Margin="28" HorizontalAlignment="Center" VerticalAlignment="Center" Spacing="14" MaxWidth="270">
+                            <FontIcon Glyph="&#xE702;" FontSize="34" HorizontalAlignment="Center" Opacity="0.6" />
                             <TextBlock Text="Nenhum dispositivo corresponde ao filtro atual." TextAlignment="Center" TextWrapping="Wrap" Opacity="0.72" />
-                            <TextBlock Text="Emparelhe um dispositivo no Windows e atualize a lista." TextAlignment="Center" TextWrapping="Wrap" Style="{StaticResource CaptionText}" />
+                            <TextBlock Text="Emparelhe um dispositivo no Windows ou escolha outro filtro." TextAlignment="Center" TextWrapping="Wrap" Style="{StaticResource CaptionText}" />
                         </StackPanel>
                     </Grid>
                 </Grid>
             </Border>
 
-            <Border Grid.Column="1" Background="{StaticResource SubtlePanelBrush}" BorderBrush="{StaticResource PanelBorderBrush}" BorderThickness="1" CornerRadius="12" Padding="22">
-                <ScrollViewer VerticalScrollBarVisibility="Auto">
+            <Border Grid.Column="1" Background="{StaticResource SubtlePanelBrush}" BorderBrush="{StaticResource PanelBorderBrush}" BorderThickness="1" CornerRadius="12" Padding="24">
+                <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
                     <StackPanel Spacing="8">
                         <TextBlock x:Name="SelectedDeviceName" Text="Selecione um dispositivo" FontSize="26" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" />
                         <TextBlock x:Name="SelectedDeviceSubtitle" Text="A lista usa observações do Windows, não polling agressivo." Opacity="0.72" TextWrapping="Wrap" />
                         <InfoBar x:Name="StatusInfoBar" IsOpen="True" Severity="Informational" Message="Aguardando enumeração dos dispositivos emparelhados..." Margin="0,8,0,8" />
 
                         <TextBlock Text="Conexão" Style="{StaticResource SectionHeading}" />
-                        <Grid ColumnDefinitions="150,*" RowDefinitions="Auto,Auto,Auto,Auto" RowSpacing="5">
+                        <Grid ColumnDefinitions="150,*" RowDefinitions="Auto,Auto,Auto,Auto" RowSpacing="6">
                             <TextBlock Text="Estado Bluetooth" Style="{StaticResource CaptionText}" />
-                            <TextBlock x:Name="ConnectionStateText" Grid.Column="1" Text="—" />
+                            <TextBlock x:Name="ConnectionStateText" Grid.Column="1" Text="—" TextTrimming="CharacterEllipsis" />
                             <TextBlock Grid.Row="1" Text="Transporte" Style="{StaticResource CaptionText}" />
                             <TextBlock x:Name="TransportText" Grid.Row="1" Grid.Column="1" Text="—" />
                             <TextBlock Grid.Row="2" Text="Endereço" Style="{StaticResource CaptionText}" />
@@ -95,24 +96,29 @@
                         </Grid>
 
                         <TextBlock Text="Bateria" Style="{StaticResource SectionHeading}" />
-                        <Grid ColumnDefinitions="150,*" RowDefinitions="Auto,Auto" RowSpacing="5">
+                        <Grid ColumnDefinitions="150,*" RowDefinitions="Auto,Auto" RowSpacing="6">
                             <TextBlock Text="Estado" Style="{StaticResource CaptionText}" />
                             <TextBlock x:Name="BatteryText" Grid.Column="1" Text="—" />
                             <TextBlock Grid.Row="1" Text="Fonte" Style="{StaticResource CaptionText}" />
-                            <TextBlock x:Name="BatterySourceText" Grid.Row="1" Grid.Column="1" Text="—" />
+                            <TextBlock x:Name="BatterySourceText" Grid.Row="1" Grid.Column="1" Text="—" TextTrimming="CharacterEllipsis" />
                         </Grid>
 
                         <TextBlock Text="Capacidades observadas" Style="{StaticResource SectionHeading}" />
                         <TextBlock x:Name="CapabilitiesText" Text="—" TextWrapping="Wrap" />
 
                         <TextBlock Text="Áudio de mídia" Style="{StaticResource SectionHeading}" />
-                        <TextBlock Text="O Windows expõe o A2DP Sink por AudioPlaybackConnection. A conexão só é aberta quando um alvo compatível for retornado pelo seletor oficial." TextWrapping="Wrap" Opacity="0.72" />
+                        <TextBlock Text="O Windows pode transformar o PC em um destino A2DP usando AudioPlaybackConnection. O telefone precisa enviar a mídia para o PC; o Windows reproduz no endpoint padrão." TextWrapping="Wrap" Opacity="0.72" />
+                        <TextBlock x:Name="A2dpTargetText" Text="Alvo A2DP: aguardando seleção" TextWrapping="Wrap" Style="{StaticResource CaptionText}" />
                         <Button x:Name="MediaAudioButton" Content="Ativar áudio do smartphone" Click="MediaAudioButton_Click" IsEnabled="False" HorizontalAlignment="Left" />
-                        <ComboBox x:Name="OutputEndpointComboBox" Header="Endpoint de saída" DisplayMemberPath="Name" SelectionChanged="OutputEndpointComboBox_SelectionChanged" />
+                        <CheckBox x:Name="AutoReconnectCheckBox" Content="Reconectar áudio automaticamente" IsChecked="True" Checked="AutoReconnectCheckBox_Changed" Unchecked="AutoReconnectCheckBox_Changed" />
+                        <ComboBox x:Name="OutputEndpointComboBox" Header="Endpoint padrão observado" DisplayMemberPath="Name" SelectionChanged="OutputEndpointComboBox_SelectionChanged" />
+                        <TextBlock Text="A AudioPlaybackConnection pública não aceita endpoint arbitrário por conexão. Para ouvir no headset, deixe-o como dispositivo padrão de reprodução do Windows." TextWrapping="Wrap" Style="{StaticResource CaptionText}" />
 
                         <TextBlock Text="Chamadas" Style="{StaticResource SectionHeading}" />
-                        <InfoBar IsOpen="True" Severity="Warning" Title="HFP ainda não habilitado" Message="A API PhoneLineTransportDevice está presente, mas nenhum transporte de telefone foi exposto. O projeto não simula suporte a chamadas." IsClosable="False" />
-                        <TextBlock Text="O endpoint de entrada/saída será ativado somente depois de uma prova HFP real com telefone emparelhado e capability/packaging validados." TextWrapping="Wrap" Style="{StaticResource CaptionText}" />
+                        <InfoBar x:Name="HfpStatusInfoBar" IsOpen="True" Severity="Warning" Title="HFP aguardando teste" Message="Selecione um smartphone e use o botão para solicitar o acesso real ao transporte telefônico." IsClosable="False" />
+                        <TextBlock x:Name="HfpTransportText" Text="Transporte HFP: aguardando seleção" TextWrapping="Wrap" Style="{StaticResource CaptionText}" />
+                        <Button x:Name="HfpEnableButton" Content="Testar / habilitar chamadas" Click="HfpEnableButton_Click" IsEnabled="False" HorizontalAlignment="Left" />
+                        <TextBlock Text="O Windows pode negar o acesso porque phoneLineTransportManagement é uma capability restrita. O aplicativo registra a resposta e não simula áudio de chamadas." TextWrapping="Wrap" Style="{StaticResource CaptionText}" />
                     </StackPanel>
                 </ScrollViewer>
             </Border>

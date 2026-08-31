@@ -1,60 +1,87 @@
 # Bluetooth profiles and public Windows surfaces
 
-This document records the initial technical map for BTHaven. It is not a claim that every desired feature is available to third-party desktop software.
+This document records the evidence boundary for BTHaven. A successful build or device enumeration is not treated as proof of profile negotiation or audible/call audio.
 
 ## Profile map
 
-| Scenario | Bluetooth role wanted by BTHaven | Windows surface investigated | Initial classification |
+| Scenario | Role wanted by BTHaven | Windows surface | Current classification |
 |---|---|---|---|
-| Inventory | observe paired/present/connected devices | `Windows.Devices.Enumeration`, `DeviceWatcher`, `Windows.Devices.Bluetooth` | `SUPPORTED_PUBLIC` for the documented enumeration surfaces; device properties remain device/stack dependent |
-| Battery properties | read exposed Windows association properties | `DeviceInformation.Properties`, `System.Devices.*` | `SUPPORTED_PUBLIC` when Windows exposes the property; otherwise unavailable |
-| BLE battery | GATT client | `BluetoothLEDevice`, `GattServiceUuids.Battery`, `GattCharacteristicUuids.BatteryLevel` | `SUPPORTED_PUBLIC` with the Bluetooth capability and a device that exposes the standard service |
-| Phone media to PC | Windows is an A2DP Sink | `Windows.Media.Audio.AudioPlaybackConnection` | `SUPPORTED_PUBLIC` for the documented remote playback scenario, introduced in Windows 10 version 2004 |
-| Phone calls | Windows is a generic HFP Hands-Free Unit | `Windows.ApplicationModel.Calls.PhoneLineTransportDevice` plus any Bluetooth/profile surface | `UNKNOWN` until the probe and packaging/capability evidence establish the exact role |
-| PC endpoint listing | enumerate render/capture endpoints | Core Audio / WASAPI (`IMMDeviceEnumerator`) | `SUPPORTED_PUBLIC` for desktop applications |
+| Inventory | observe paired/present/connected devices | `DeviceWatcher`, `Windows.Devices.Bluetooth`, `Windows.Devices.Enumeration` | `SUPPORTED_PUBLIC` |
+| Battery properties | read exposed association properties | `DeviceInformation.Properties`, `System.Devices.*` | `SUPPORTED_PUBLIC` when exposed; otherwise unavailable |
+| BLE battery | GATT client | `BluetoothLEDevice`, Battery Service `0x180F`, Battery Level `0x2A19` | `SUPPORTED_PUBLIC` when the device exposes it |
+| Phone media to PC | Windows acts as A2DP Sink | `Windows.Media.Audio.AudioPlaybackConnection` | `SUPPORTED_PUBLIC` for the documented remote-playback path |
+| Phone calls | Windows acts as a generic HFP Hands-Free Unit | `PhoneLineTransportDevice` and Bluetooth/profile APIs | `UNKNOWN` / restricted on the current system |
+| PC endpoint listing | enumerate render/capture endpoints | Core Audio / WASAPI | `SUPPORTED_PUBLIC` |
 
-## Probe evidence from this machine
+## Live evidence from the development machine
 
-The Phase 0 executables ran on Windows `10.0.26200.9168` with an adapter reporting Classic and Low Energy support. No Bluetooth devices were paired or exposed to the current user, so the snapshot and watcher counts were zero. The APIs themselves returned successfully after correcting the property key to the documented `System.Devices.Aep.ContainerId` spelling.
+The probes ran on Windows `10.0.26200`, x64, with a Bluetooth adapter reporting Classic and Low Energy support. The paired Android phone appeared as one Classic and one BLE association endpoint sharing a container ID. The Classic endpoint reported `IsConnected=true` during the latest run.
 
-`AudioPlaybackConnection.GetDeviceSelector()` returned successfully but found zero A2DP sink targets. `PhoneLineTransportDevice` and `CallsPhoneContract` v5 were present and its selector was created, but zero phone-line transport devices were returned. These observations are machine-state evidence; they are not universal compatibility claims.
+### A2DP
+
+`AudioPlaybackConnection.GetDeviceSelector()` returned one target for the phone. Exercising the first ID returned directly by that selector produced:
+
+```text
+A2DP.Connection.Started
+A2DP.Connection.StateChanged: Opened
+A2DP.Connection.OpenResult: Success
+A2DP.Connection.Disposed
+```
+
+The public Microsoft guidance describes this exact sequence:
+
+1. call `GetDeviceSelector()`;
+2. discover a `DeviceInformation` target;
+3. call `TryCreateFromId` with that target's exact ID;
+4. call `StartAsync()`;
+5. call `OpenAsync()`;
+6. keep the connection object alive while audio is expected;
+7. observe state changes and dispose it when finished.
+
+The current machine's default render endpoint is `Speakers (PRO X 2 LIGHTSPEED)`. `AudioPlaybackConnection` routes through the Windows system playback endpoint; its public API does not expose an arbitrary per-connection WASAPI endpoint selector. BTHaven therefore warns when the selected endpoint is not the Windows default instead of pretending to route it.
+
+The remaining physical acceptance step is audible playback: start media on the phone, select the PC as the phone's Bluetooth media output, activate BTHaven A2DP, and listen on the Windows default headset.
+
+### HFP
+
+The runtime type and `CallsPhoneContract` v5 are present. The selector returned one concrete Bluetooth phone-line transport with:
+
+```text
+AudioRoutingStatus=CanRouteToLocalDevice
+InBandRingingEnabled=true
+IsRegistered=false
+```
+
+The live action run returned:
+
+```text
+RequestAccessAsync -> DeniedBySystem
+RegisterApp        -> UnauthorizedAccessException, HRESULT 0x80070005
+ConnectAsync       -> not reached after registration denial
+```
+
+Microsoft documents `phoneLineTransportManagement` as a restricted capability for the access and registration operations. This does not prove a generic third-party HFP Hands-Free Unit implementation. BTHaven exposes a test button that calls the real API and displays the result; it never reports HFP audio as active from enumeration alone.
 
 ## Device state semantics
 
-The application must not collapse these fields:
+The application keeps these observations separate:
 
-- **paired**: Windows has a pairing association;
-- **present**: the association endpoint is currently visible to the system;
-- **connected**: the requested device/profile reports an active connection;
-- **available**: an API can create or use the requested profile connection.
+- **paired:** Windows has a pairing association;
+- **present:** the association endpoint is visible to Windows;
+- **connected:** the relevant endpoint reports an active connection;
+- **available:** the requested profile API returns a target that can be created/used.
 
-A `DeviceInformation` object can represent a particular device kind or interface. The selector and `DeviceInformationKind` matter when correlating records.
+A single logical phone may have separate Classic and BLE endpoints. BTHaven groups them by `System.Devices.Aep.ContainerId` when available, while retaining the source transport and raw observation information in local diagnostics.
 
-## A2DP sink evidence
+## Battery behavior
 
-Microsoft's remote-audio playback guidance explicitly describes the PC behaving like a Bluetooth speaker for a phone. The documented sequence is:
+Battery results come from a provider chain:
 
-1. create a watcher with `AudioPlaybackConnection.GetDeviceSelector()`;
-2. call `AudioPlaybackConnection.TryCreateFromId(deviceId)`;
-3. call `StartAsync()` to enable the connection;
-4. call `OpenAsync()` to open it;
-5. observe `StateChanged` and dispose the connection when finished.
+1. Windows association properties;
+2. standard BLE GATT Battery Service and Battery Level characteristic;
+3. vendor providers only as future explicit extensions.
 
-The same guidance says audio is played through the system audio endpoints. The API reference does not expose a per-connection WASAPI endpoint selector. BTHaven therefore treats endpoint selection as a separate routing investigation instead of assuming the API supports arbitrary direct routing.
-
-## HFP distinction
-
-Windows documents HFP audio behavior for Bluetooth Classic audio devices and documents `PhoneLineTransportDevice` as a hardware device associated with a `PhoneLine`, currently supported for Bluetooth devices. These facts are not equivalent to a public, generic, third-party registration API for an arbitrary phone's HFP Audio Gateway connection.
-
-The HFP probe records:
-
-- whether the runtime type and `CallsPhoneContract` are present;
-- whether `PhoneLineTransportDevice.GetDeviceSelector()` returns a selector;
-- whether transport devices are exposed;
-- access, registration, and connection results when a concrete device exists;
-- exact exception/HRESULT values when an operation is rejected.
-
-On the current machine the last three operations were not invoked because the selector returned zero targets.
+No percentage is synthesized. If neither a percentage nor a trustworthy charging state is available, the model reports `unavailable` and logs the provider results.
 
 ## Official references
 
@@ -65,8 +92,7 @@ On the current machine the last three operations were not invoked because the se
 - [DeviceWatcher class](https://learn.microsoft.com/en-us/uwp/api/windows.devices.enumeration.devicewatcher?view=winrt-28000)
 - [BluetoothDevice class](https://learn.microsoft.com/en-us/uwp/api/windows.devices.bluetooth.bluetoothdevice?view=winrt-28000)
 - [Bluetooth Classic Audio](https://learn.microsoft.com/en-us/windows-hardware/drivers/bluetooth/bluetooth-classic-audio)
-- [PhoneLineTransportDevice class](https://learn.microsoft.com/en-us/uwp/api/windows.applicationmodel.calls.phonelinetransportdevice?view=winrt-28000)
+- [PhoneLineTransportDevice](https://learn.microsoft.com/en-us/uwp/api/windows.applicationmodel.calls.phonelinetransportdevice?view=winrt-28000)
 - [PhoneLineTransportDevice.RequestAccessAsync](https://learn.microsoft.com/en-us/uwp/api/windows.applicationmodel.calls.phonelinetransportdevice.requestaccessasync?view=winrt-28000)
+- [PhoneLineTransportDevice.RegisterApp](https://learn.microsoft.com/en-us/uwp/api/windows.applicationmodel.calls.phonelinetransportdevice.registerapp?view=winrt-28000)
 - [Bluetooth GATT Client](https://learn.microsoft.com/en-us/windows/apps/develop/devices-sensors/gatt-client)
-- [GattServiceUuids.Battery](https://learn.microsoft.com/en-us/uwp/api/windows.devices.bluetooth.genericattributeprofile.gattserviceuuids.battery?view=winrt-28000)
-- [GattCharacteristicUuids.BatteryLevel](https://learn.microsoft.com/en-us/uwp/api/windows.devices.bluetooth.genericattributeprofile.gattcharacteristicuuids.batterylevel?view=winrt-28000)

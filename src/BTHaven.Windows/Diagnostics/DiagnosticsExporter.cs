@@ -14,7 +14,7 @@ namespace BTHaven.Windows.Diagnostics;
 
 public sealed class DiagnosticsExporter
 {
-    private const string SchemaVersion = "1";
+    private const string SchemaVersion = "2";
     private readonly IBluetoothDeviceService deviceService;
     private readonly IAudioEndpointService endpointService;
     private readonly IWindowsDiagnosticLogger logger;
@@ -31,12 +31,19 @@ public sealed class DiagnosticsExporter
 
     public async Task<string> ExportAsync(CancellationToken cancellationToken = default)
     {
+        logger.Info("Diagnostics.ExportStarted", new Dictionary<string, object?>
+        {
+            ["maxLogLines"] = 5000,
+            ["redacted"] = true,
+        });
+
         var errors = new List<object>();
         var devices = await TryGetDevicesAsync(errors, cancellationToken).ConfigureAwait(false);
         var renderEndpoints = await TryGetEndpointsAsync(AudioEndpointDirection.Render, errors, cancellationToken).ConfigureAwait(false);
         var captureEndpoints = await TryGetEndpointsAsync(AudioEndpointDirection.Capture, errors, cancellationToken).ConfigureAwait(false);
         var adapter = await TryGetAdapterAsync(errors, cancellationToken).ConfigureAwait(false);
         var hfp = await TryGetHfpAsync(errors, cancellationToken).ConfigureAwait(false);
+        var recentLogs = logger.ReadRecent(maxLines: 5000, redactSensitive: true);
 
         var payload = new
         {
@@ -75,7 +82,8 @@ public sealed class DiagnosticsExporter
         using (var archive = System.IO.Compression.ZipFile.Open(path, System.IO.Compression.ZipArchiveMode.Create))
         {
             WriteEntry(archive, "diagnostics.json", json);
-            WriteEntry(archive, "README.txt", "BTHaven diagnostics export. Device identifiers and names are redacted. Audio buffers, phone numbers, caller IDs, and telemetry are not included.\r\n");
+            WriteEntry(archive, "logs.jsonl", string.Join(Environment.NewLine, recentLogs) + (recentLogs.Count == 0 ? string.Empty : Environment.NewLine));
+            WriteEntry(archive, "README.txt", "BTHaven diagnostics export. Device identifiers and names are redacted. Audio buffers, phone numbers, caller IDs, and telemetry are not included. Logs are JSONL and were exported with sensitive fields redacted.\r\n");
         }
 
         logger.Info("Diagnostics.ExportCompleted", new Dictionary<string, object?>
@@ -84,6 +92,7 @@ public sealed class DiagnosticsExporter
             ["deviceCount"] = devices.Count,
             ["endpointCount"] = renderEndpoints.Count + captureEndpoints.Count,
             ["errorCount"] = errors.Count,
+            ["logLineCount"] = recentLogs.Count,
         });
         return path;
     }

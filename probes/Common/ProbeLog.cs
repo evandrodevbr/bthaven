@@ -44,6 +44,7 @@ public static class ProbeLog
             exceptionType = exception.GetType().FullName,
             message = exception.Message,
             hResult = $"0x{exception.HResult:X8}",
+            stackTrace = exception.ToString(),
             data,
         });
     }

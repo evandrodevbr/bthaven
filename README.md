@@ -12,7 +12,7 @@
 
 The project is intentionally evidence-driven. Features that depend on restricted, undocumented, or profile-specific Windows behavior are preceded by executable probes. The HFP call path is a hard architecture gate: the application will not pretend to support phone calls until the Windows role and transport have been demonstrated with code and a real device.
 
-> **Status:** Phase 1–3 groundwork is implemented. Device enumeration, layered battery providers, A2DP service state, endpoint inventory, HFP transport discovery, and Core Audio probes are available. The complete WinUI 3 shell and HFP call path remain gated by physical-device evidence.
+> **Status:** The WinUI 3 shell, structured local logs, diagnostics export, device enumeration, layered battery providers, A2DP service, endpoint inventory, and controlled A2DP reconnect are implemented. On the development machine, the official A2DP target opens successfully; audible end-to-end playback still requires listening while phone media is actively routed to the PC. HFP transport discovery works, but access is denied by the restricted Windows capability and call audio remains blocked.
 
 ## Scope
 
@@ -50,11 +50,13 @@ See:
 
 ## Build the Phase 0 probes
 
-A per-user .NET SDK is sufficient; no system-wide SDK installation is required. With .NET 10 on `PATH`:
+A per-user .NET SDK is sufficient; no system-wide SDK installation is required. In **Windows PowerShell**:
 
 ```powershell
-dotnet restore BTHaven.slnx
-dotnet build BTHaven.slnx -c Release -p:Platform=x64
+Set-Location 'C:\Users\evand\Documents\GitHub\bthaven'
+$env:Path = "$env:USERPROFILE\.dotnet;$env:Path"
+& "$env:USERPROFILE\.dotnet\dotnet.exe" restore BTHaven.slnx
+& "$env:USERPROFILE\.dotnet\dotnet.exe" build BTHaven.slnx -c Release -p:Platform=x64
 ```
 
 From Git Bash, if the SDK was installed per-user:
@@ -69,12 +71,12 @@ Run the probes individually so their output can be inspected:
 ```text
 dotnet run --project probes/01-device-enumeration -c Release -- --watch-seconds 5
 dotnet run --project probes/02-battery -c Release
-dotnet run --project probes/03-a2dp-sink -c Release
+dotnet run --project probes/03-a2dp-sink -c Release -- --exercise-first --hold-seconds 15
 dotnet run --project probes/04-phone-hfp -c Release
 dotnet run --project probes/05-call-audio-routing -c Release
 ```
 
-The A2DP probe accepts `--device-id <id>` after the device list has been inspected. The HFP probe is discovery-only by default; access, registration, and connection attempts require explicit flags because they can change per-user Windows call integration state:
+The A2DP probe accepts `--device-id <id>` after the device list has been inspected, or `--exercise-first` to use the first ID returned by the official selector without shell escaping errors. The HFP probe is discovery-only by default; access, registration, and connection attempts require explicit flags because they can change per-user Windows call integration state:
 
 ```text
 dotnet run --project probes/04-phone-hfp -c Release -- --request-access --register --connect

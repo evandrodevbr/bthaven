@@ -20,12 +20,24 @@ public sealed class AudioEndpointManager : IAudioEndpointService
     {
         cancellationToken.ThrowIfCancellationRequested();
         var dataFlow = direction == AudioEndpointDirection.Render ? DataFlow.Render : DataFlow.Capture;
+        logger.Info("Audio.Endpoints.EnumerationStarted", new Dictionary<string, object?>
+        {
+            ["direction"] = direction.ToString(),
+            ["dataFlow"] = dataFlow.ToString(),
+        });
+
         using var enumerator = new MMDeviceEnumerator();
         string? defaultId = null;
         try
         {
             using var defaultDevice = enumerator.GetDefaultAudioEndpoint(dataFlow, Role.Communications);
             defaultId = defaultDevice.ID;
+            logger.Info("Audio.DefaultEndpoint.Observed", new Dictionary<string, object?>
+            {
+                ["direction"] = direction.ToString(),
+                ["endpointId"] = defaultDevice.ID,
+                ["name"] = defaultDevice.FriendlyName,
+            });
         }
         catch (Exception exception)
         {
@@ -36,33 +48,55 @@ public sealed class AudioEndpointManager : IAudioEndpointService
         }
 
         var endpoints = new List<AudioEndpointModel>();
-        var nativeDevices = enumerator.EnumerateAudioEndPoints(dataFlow, DeviceState.Active);
-        foreach (var nativeDevice in nativeDevices)
+        try
         {
-            cancellationToken.ThrowIfCancellationRequested();
-            using (nativeDevice)
+            var nativeDevices = enumerator.EnumerateAudioEndPoints(dataFlow, DeviceState.Active);
+            foreach (var nativeDevice in nativeDevices)
             {
-                endpoints.Add(new AudioEndpointModel
+                cancellationToken.ThrowIfCancellationRequested();
+                using (nativeDevice)
                 {
-                    Id = nativeDevice.ID,
-                    Name = nativeDevice.FriendlyName,
-                    Direction = direction,
-                    IsDefault = string.Equals(nativeDevice.ID, defaultId, StringComparison.OrdinalIgnoreCase),
-                    IsActive = nativeDevice.State == DeviceState.Active,
-                    Format = TryGetMixFormat(nativeDevice, logger),
-                });
+                    var endpoint = new AudioEndpointModel
+                    {
+                        Id = nativeDevice.ID,
+                        Name = nativeDevice.FriendlyName,
+                        Direction = direction,
+                        IsDefault = string.Equals(nativeDevice.ID, defaultId, StringComparison.OrdinalIgnoreCase),
+                        IsActive = nativeDevice.State == DeviceState.Active,
+                        Format = TryGetMixFormat(nativeDevice),
+                    };
+                    endpoints.Add(endpoint);
+                    logger.Debug("Audio.Endpoint.Observed", new Dictionary<string, object?>
+                    {
+                        ["direction"] = endpoint.Direction.ToString(),
+                        ["endpointId"] = endpoint.Id,
+                        ["name"] = endpoint.Name,
+                        ["isDefault"] = endpoint.IsDefault,
+                        ["isActive"] = endpoint.IsActive,
+                        ["format"] = endpoint.Format,
+                    });
+                }
             }
+        }
+        catch (Exception exception)
+        {
+            logger.Error("Audio.Endpoints.EnumerationFailed", exception, new Dictionary<string, object?>
+            {
+                ["direction"] = direction.ToString(),
+            });
+            throw;
         }
 
         logger.Info("Audio.Endpoints.Enumerated", new Dictionary<string, object?>
         {
             ["direction"] = direction.ToString(),
             ["count"] = endpoints.Count,
+            ["defaultFound"] = defaultId is not null,
         });
         return Task.FromResult<IReadOnlyList<AudioEndpointModel>>(endpoints);
     }
 
-    private static string? TryGetMixFormat(MMDevice device, IWindowsDiagnosticLogger logger)
+    private string? TryGetMixFormat(MMDevice device)
     {
         try
         {

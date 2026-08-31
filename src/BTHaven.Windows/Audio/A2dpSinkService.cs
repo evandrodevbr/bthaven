@@ -6,15 +6,27 @@ using Windows.Media.Audio;
 
 namespace BTHaven.Windows.Audio;
 
-public sealed record RemoteAudioDeviceInfo(string Id, string Name);
+public sealed record RemoteAudioDeviceInfo(
+    string Id,
+    string Name,
+    string? ContainerId,
+    string? Address);
 
 public sealed class A2dpSinkService : IMediaAudioSink, IAsyncDisposable
 {
+    private static readonly IReadOnlyList<string> RequestedProperties =
+    [
+        "System.Devices.Aep.ContainerId",
+        "System.Devices.Aep.DeviceAddress",
+    ];
+
     private readonly object sync = new();
     private readonly IWindowsDiagnosticLogger logger;
     private AudioPlaybackConnection? connection;
     private string? deviceId;
     private MediaAudioSinkState state = MediaAudioSinkState.Disabled;
+
+    public event Action<MediaAudioSinkState>? StateChanged;
 
     public A2dpSinkService(IWindowsDiagnosticLogger? logger = null)
     {
@@ -61,9 +73,52 @@ public sealed class A2dpSinkService : IMediaAudioSink, IAsyncDisposable
     {
         cancellationToken.ThrowIfCancellationRequested();
         var selector = AudioPlaybackConnection.GetDeviceSelector();
-        var devices = await DeviceInformation.FindAllAsync(selector);
-        cancellationToken.ThrowIfCancellationRequested();
-        return devices.Select(device => new RemoteAudioDeviceInfo(device.Id, device.Name)).ToArray();
+        logger.Info("A2DP.Discovery.Started", new Dictionary<string, object?>
+        {
+            ["selector"] = selector,
+            ["properties"] = RequestedProperties,
+        });
+
+        try
+        {
+            var devices = await DeviceInformation.FindAllAsync(selector, RequestedProperties);
+            cancellationToken.ThrowIfCancellationRequested();
+            var result = devices.Select(device => new RemoteAudioDeviceInfo(
+                device.Id,
+                device.Name,
+                GetProperty(device, "System.Devices.Aep.ContainerId"),
+                GetProperty(device, "System.Devices.Aep.DeviceAddress"))).ToArray();
+
+            logger.Info("A2DP.Discovery.Completed", new Dictionary<string, object?>
+            {
+                ["count"] = result.Length,
+                ["selector"] = selector,
+            });
+            foreach (var target in result)
+            {
+                logger.Debug("A2DP.Target.Observed", new Dictionary<string, object?>
+                {
+                    ["deviceId"] = target.Id,
+                    ["name"] = target.Name,
+                    ["containerId"] = target.ContainerId,
+                    ["address"] = target.Address,
+                });
+            }
+            return result;
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            logger.Info("A2DP.Discovery.Cancelled");
+            throw;
+        }
+        catch (Exception exception)
+        {
+            logger.Error("A2DP.Discovery.Failed", exception, new Dictionary<string, object?>
+            {
+                ["selector"] = selector,
+            });
+            throw;
+        }
     }
 
     public async Task<bool> ConnectAsync(
@@ -72,6 +127,10 @@ public sealed class A2dpSinkService : IMediaAudioSink, IAsyncDisposable
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(requestedDeviceId);
         cancellationToken.ThrowIfCancellationRequested();
+        logger.Info("A2DP.Connection.Requested", new Dictionary<string, object?>
+        {
+            ["deviceId"] = requestedDeviceId,
+        });
         await DisconnectAsync(cancellationToken).ConfigureAwait(false);
         SetState(MediaAudioSinkState.Starting, requestedDeviceId);
 
@@ -82,7 +141,7 @@ public sealed class A2dpSinkService : IMediaAudioSink, IAsyncDisposable
             if (newConnection is null)
             {
                 SetState(MediaAudioSinkState.Failed, requestedDeviceId);
-                logger.Info("A2DP.Connection.Unavailable", new Dictionary<string, object?>
+                logger.Warning("A2DP.Connection.Unavailable", new Dictionary<string, object?>
                 {
                     ["deviceId"] = requestedDeviceId,
                     ["reason"] = "TryCreateFromId returned null",
@@ -91,21 +150,25 @@ public sealed class A2dpSinkService : IMediaAudioSink, IAsyncDisposable
             }
 
             newConnection.StateChanged += OnStateChanged;
+            logger.Debug("A2DP.Connection.Starting", new Dictionary<string, object?>
+            {
+                ["deviceId"] = requestedDeviceId,
+                ["state"] = newConnection.State.ToString(),
+            });
             await newConnection.StartAsync();
             SetState(MediaAudioSinkState.Started, requestedDeviceId);
-            cancellationToken.ThrowIfCancellationRequested();
             SetState(MediaAudioSinkState.Opening, requestedDeviceId);
             var openResult = await newConnection.OpenAsync();
+            logger.Info("A2DP.Connection.OpenResult", new Dictionary<string, object?>
+            {
+                ["deviceId"] = requestedDeviceId,
+                ["status"] = openResult.Status.ToString(),
+                ["state"] = newConnection.State.ToString(),
+            });
             cancellationToken.ThrowIfCancellationRequested();
             if (openResult.Status != AudioPlaybackConnectionOpenResultStatus.Success)
             {
                 SetState(MediaAudioSinkState.Failed, requestedDeviceId);
-                logger.Info("A2DP.Connection.OpenFailed", new Dictionary<string, object?>
-                {
-                    ["deviceId"] = requestedDeviceId,
-                    ["status"] = openResult.Status.ToString(),
-                });
-                newConnection.Dispose();
                 return false;
             }
 
@@ -119,13 +182,18 @@ public sealed class A2dpSinkService : IMediaAudioSink, IAsyncDisposable
             {
                 ["deviceId"] = requestedDeviceId,
                 ["state"] = newConnection.State.ToString(),
+                ["audioPath"] = "Windows system playback endpoint",
             });
             newConnection = null;
             return true;
         }
-        catch (OperationCanceledException)
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
             SetState(MediaAudioSinkState.Failed, requestedDeviceId);
+            logger.Info("A2DP.Connection.Cancelled", new Dictionary<string, object?>
+            {
+                ["deviceId"] = requestedDeviceId,
+            });
             throw;
         }
         catch (Exception exception)
@@ -146,8 +214,8 @@ public sealed class A2dpSinkService : IMediaAudioSink, IAsyncDisposable
     public async Task DisconnectAsync(CancellationToken cancellationToken = default)
     {
         cancellationToken.ThrowIfCancellationRequested();
-        AudioPlaybackConnection? oldConnection;
         string? oldDeviceId;
+        AudioPlaybackConnection? oldConnection;
         lock (sync)
         {
             oldConnection = connection;
@@ -157,19 +225,26 @@ public sealed class A2dpSinkService : IMediaAudioSink, IAsyncDisposable
             state = MediaAudioSinkState.Disabled;
         }
 
-        if (oldConnection is not null)
+        if (oldConnection is null)
         {
-            oldConnection.Dispose();
-            logger.Info("A2DP.Connection.Closed", new Dictionary<string, object?>
-            {
-                ["deviceId"] = oldDeviceId,
-            });
+            logger.Debug("A2DP.Connection.NoActiveConnection");
+            return;
         }
+
+        oldConnection.Dispose();
+        logger.Info("A2DP.Connection.Closed", new Dictionary<string, object?>
+        {
+            ["deviceId"] = oldDeviceId,
+        });
         await Task.CompletedTask;
     }
 
     public async Task EnableAsync(string requestedDeviceId, CancellationToken cancellationToken = default)
     {
+        logger.Info("A2DP.Enable.Requested", new Dictionary<string, object?>
+        {
+            ["deviceId"] = requestedDeviceId,
+        });
         if (!await ConnectAsync(requestedDeviceId, cancellationToken).ConfigureAwait(false))
         {
             throw new InvalidOperationException($"Unable to open the A2DP connection for '{requestedDeviceId}'.");
@@ -178,11 +253,13 @@ public sealed class A2dpSinkService : IMediaAudioSink, IAsyncDisposable
 
     public Task DisableAsync(CancellationToken cancellationToken = default)
     {
+        logger.Info("A2DP.Disable.Requested");
         return DisconnectAsync(cancellationToken);
     }
 
     public ValueTask DisposeAsync()
     {
+        logger.Info("A2DP.Service.Disposed");
         return new ValueTask(DisconnectAsync());
     }
 
@@ -198,14 +275,32 @@ public sealed class A2dpSinkService : IMediaAudioSink, IAsyncDisposable
             ["deviceId"] = requestedDeviceId,
             ["state"] = nextState.ToString(),
         });
+        StateChanged?.Invoke(nextState);
     }
 
     private void OnStateChanged(AudioPlaybackConnection sender, object args)
     {
+        var nextState = sender.State switch
+        {
+            AudioPlaybackConnectionState.Opened => MediaAudioSinkState.Opened,
+            AudioPlaybackConnectionState.Closed => MediaAudioSinkState.Disabled,
+            _ => State,
+        };
+        lock (sync)
+        {
+            state = nextState;
+        }
         logger.Info("A2DP.Connection.StateChanged", new Dictionary<string, object?>
         {
             ["deviceId"] = sender.DeviceId,
             ["state"] = sender.State.ToString(),
+            ["mappedState"] = nextState.ToString(),
         });
+        StateChanged?.Invoke(nextState);
+    }
+
+    private static string? GetProperty(DeviceInformation device, string key)
+    {
+        return device.Properties.TryGetValue(key, out var value) ? value?.ToString() : null;
     }
 }

@@ -1,106 +1,132 @@
 # Phase 0 probe results
 
-This file is the evidence ledger for the current machine. It is updated from command output, not from compilation alone. Raw logs are intentionally kept out of git because they can contain device names, IDs, Bluetooth addresses, and endpoint names.
+This file is the evidence ledger for the current Windows machine. It is updated from command output, not from compilation alone. Raw logs are intentionally kept out of git because they can contain device names, IDs, Bluetooth addresses, and endpoint names.
 
 ## Environment
 
 | Field | Value |
 |---|---|
-| Windows build | `10.0.26200.9168` (`Microsoft Windows 10.0.26200` from the runtime) |
+| Windows build | `Microsoft Windows 10.0.26200` |
 | Windows SDK | `10.0.26100.0` include/lib |
 | .NET SDK | `10.0.400` installed per-user at `C:\Users\evand\.dotnet` |
 | .NET runtime | `10.0.11`, `win-x64` |
-| Bluetooth adapter | available; Classic and Low Energy both reported supported |
-| Probe run window | `2026-08-30T18:44:49Z`–`18:44:55Z`; enumeration rerun at `18:46:37Z` after correcting an invalid property key; HFP opt-in run at `18:51:48Z` |
+| Bluetooth adapter | available; Classic and Low Energy both supported |
+| Current probe run | `2026-08-31T01:46:26Z`–`01:47:36Z` |
 
 ## Status summary
 
 ```text
-DEVICE ENUMERATION: PASS (API smoke; no paired device was present for the physical matrix)
-BATTERY:            PARTIAL
-A2DP SINK:          BLOCKED (no A2DP target; audio not exercised)
-HFP PHONE LINK:     BLOCKED (no PhoneLineTransportDevice target)
-HFP CALL AUDIO:     BLOCKED (no phone/HFP transport; only endpoint inventory ran)
+DEVICE ENUMERATION: PASS    (paired Android phone observed; Classic endpoint connected)
+BATTERY:            PARTIAL (Windows controller absent; association/GATT sources unavailable)
+A2DP SINK:          PARTIAL (official target opened with Success; audible playback not yet listened to)
+HFP PHONE LINK:     BLOCKED (transport found, access DeniedBySystem, RegisterApp 0x80070005)
+HFP CALL AUDIO:     BLOCKED (registration/connect and bidirectional call test not available)
 ```
 
 ## Per-probe evidence
 
-### 01 — device enumeration: PASS for API smoke
+### 01 — device enumeration: PASS
 
 - adapter returned `available=true`;
 - `IsClassicSupported=true`;
 - `IsLowEnergySupported=true`;
-- four snapshots completed with count `0` (`classic-paired`, `classic-connected`, `ble-paired`, `ble-connected`);
-- both `DeviceWatcher` runs reached `EnumerationCompleted` and `Stopped`;
-- no Bluetooth device was paired on this machine, so mouse/headset/phone acceptance was not run.
+- `classic-paired`: count `1`;
+- `classic-connected`: count `1`;
+- `ble-paired`: count `1`;
+- `ble-connected`: the snapshot returned `0x80004004` during one transient query, while the BLE paired watcher completed normally;
+- both paired watchers reached `EnumerationCompleted` and `Stopped`;
+- the Classic and BLE observations shared one logical container and the same phone name.
 
-The first run exposed a real probe bug: requesting `System.Devices.AepContainerId` produced `0x8002802B` (`Property key syntax error`). The probe was corrected to the documented `System.Devices.Aep.ContainerId` key and rerun successfully.
+The app must continue to distinguish the Classic connected endpoint from the BLE paired/present endpoint; they are not interchangeable states.
 
 ### 02 — battery: PARTIAL
 
 - Windows battery controllers: `0`;
-- Bluetooth association devices inspected: `0`;
-- paired BLE devices queried for GATT Battery Service: `0`;
-- the probe correctly emitted `Battery.Windows.Unavailable` instead of inventing a percentage.
+- Bluetooth association devices inspected: `1`;
+- Windows battery properties were present as null for the phone;
+- BLE Battery Service discovery returned `Unreachable` with service count `0`;
+- no percentage was invented.
 
-No positive Battery Service or Windows battery-property sample was available on this machine.
+The current phone therefore reports `battery=unavailable`, which is the correct result for the observed sources.
 
-### 03 — A2DP sink: BLOCKED for end-to-end test
+### 03 — A2DP sink: PARTIAL, connection API passed
 
-- `AudioPlaybackConnection.GetDeviceSelector()` executed;
-- A2DP-capable device interfaces returned: `0`;
-- `TryCreateFromId`, `StartAsync`, and `OpenAsync` were not run because there was no valid target ID;
-- therefore no smartphone media stream was tested.
+- `AudioPlaybackConnection.GetDeviceSelector()` returned `1` target for the paired phone;
+- the probe used the first ID returned directly by that selector (`--exercise-first`), avoiding shell escaping;
+- `StartAsync()` completed;
+- `StateChanged` reported `Opened`;
+- `OpenAsync()` returned `Success`;
+- the connection stayed alive for the requested hold period and was disposed cleanly;
+- the current default Windows render endpoint is the headset `Speakers (PRO X 2 LIGHTSPEED)`.
 
-The API path is documented by Microsoft, but this run proves only selector enumeration, not audible A2DP playback.
+This is a positive API/transport result. The remaining acceptance step is audible playback: start media on the phone, select the PC as the phone's Bluetooth media output, activate BTHaven, and listen on the Windows default headset. The public API routes through the Windows system default endpoint; it does not expose an arbitrary per-connection WASAPI endpoint selector.
 
-### 04 — HFP phone link: BLOCKED for end-to-end test
+### 04 — HFP phone link: BLOCKED
 
 - `PhoneLineTransportDevice` type: present;
 - `CallsPhoneContract` v5: present;
 - `GetDeviceSelector()`: returned a selector;
-- transport devices: `0`;
-- access, registration, and connection operations: not run because they require a concrete transport device;
-- an explicit `--request-access --register --connect` run recorded `HFP.TransportOperation.NotRun` for the same reason;
+- concrete transport devices: `1`;
+- transport: Bluetooth;
+- `AudioRoutingStatus`: `CanRouteToLocalDevice`;
+- in-band ringing: `true`;
+- initial registration: `false`;
+- `RequestAccessAsync`: `DeniedBySystem`;
+- `RegisterApp`: `UnauthorizedAccessException`, `HRESULT 0x80070005`;
+- `ConnectAsync`: not reached after registration/access rejection;
 - generic HFP Hands-Free Unit role: not proven.
 
-This is a blocked test setup, not evidence that the public API is globally unavailable. See [`hfp-feasibility.md`](hfp-feasibility.md).
+Microsoft's API references require the restricted `phoneLineTransportManagement` capability for the access/registration operations. The app exposes a button that calls the real path and reports this result; it does not label HFP active after discovery alone.
 
 ### 05 — Core Audio endpoint inventory: PASS
 
-- endpoint enumeration completed for render/capture and active/disabled/unplugged states;
 - active render endpoints: `3`;
 - active capture endpoints: `2`;
-- default communications render/capture endpoints were returned;
-- default endpoint formats were observed at 48 kHz stereo on this machine;
-- unplugged mix-format queries returned `0x88890004`, which was logged rather than hidden.
+- default render and communications endpoint: `Speakers (PRO X 2 LIGHTSPEED)`;
+- default communications capture endpoint: `Microphone (PRO X 2 LIGHTSPEED)`;
+- default render format: `48000Hz/2ch/Extensible`;
+- default capture format: `48000Hz/2ch/IeeeFloat`;
+- unplugged mix-format queries returned `0x88890004`, logged rather than hidden.
 
-This probe does not open an HFP stream and therefore cannot mark call audio as passed.
+This proves endpoint discovery and identifies the expected headset path. It does not prove HFP call PCM.
 
 ## Build and test evidence
 
 ```text
-dotnet build BTHaven.slnx -c Release --no-restore
+dotnet build BTHaven.slnx -c Release -p:Platform=x64 --no-restore
 0 warnings, 0 errors
 
-dotnet test tests/BTHaven.Core.Tests/BTHaven.Core.Tests.csproj --no-restore
-3 passed, 0 failed
+dotnet test BTHaven.slnx -c Release -p:Platform=x64 --no-restore
+Core: 11 passed, 0 failed
+Integration: 7 passed, 0 failed
 ```
 
 ## Reproduction commands
 
-```text
+### PowerShell
+
+```powershell
+Set-Location 'C:\Users\evand\Documents\GitHub\bthaven'
+$env:Path = "$env:USERPROFILE\.dotnet;$env:Path"
+& "$env:USERPROFILE\.dotnet\dotnet.exe" run --project '.\probes\03-a2dp-sink\03-a2dp-sink.csproj' -c Release -- --exercise-first --hold-seconds 15
+& "$env:USERPROFILE\.dotnet\dotnet.exe" run --project '.\probes\04-phone-hfp\04-phone-hfp.csproj' -c Release -- --request-access --register --connect
+```
+
+### Git Bash
+
+```bash
+export PATH="$HOME/.dotnet:$PATH"
 dotnet run --project probes/01-device-enumeration -c Release -- --watch-seconds 5
 dotnet run --project probes/02-battery -c Release
-dotnet run --project probes/03-a2dp-sink -c Release
-dotnet run --project probes/04-phone-hfp -c Release
+dotnet run --project probes/03-a2dp-sink -c Release -- --exercise-first --hold-seconds 15
+dotnet run --project probes/04-phone-hfp -c Release -- --request-access --register --connect
 dotnet run --project probes/05-call-audio-routing -c Release
 ```
 
 ## What remains before the gate can close
 
-1. Pair a real Android 12+ phone and at least one Classic/BLE peripheral on a Windows 11 23H2+ test machine.
-2. Rerun probes 01–04 and preserve redacted logs.
-3. Run the HFP probe with explicit `--request-access --register --connect` only after a target is returned.
-4. Execute the acceptance call with the phone answered on the phone, then verify downlink and uplink audio.
-5. Add an MSIX/package-identity run before classifying restricted capability behavior as supported.
+1. Run the updated BTHaven UI with the phone selected and click **Ativar áudio do smartphone**.
+2. Start phone media and verify audible output on the Windows default headset.
+3. Verify reconnect after the phone or A2DP target disappears and returns.
+4. Keep HFP blocked until restricted capability approval and a real bidirectional call test exist.
+5. Do not add a custom driver, HCI hook, or Phone Link reverse engineering silently.

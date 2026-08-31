@@ -31,4 +31,27 @@ public sealed class WindowsAudioServicesSmokeTests
         var devices = await service.GetAvailableDevicesAsync();
         Assert.NotNull(devices);
     }
+
+    [Fact]
+    [Trait("Category", "Integration")]
+    public async Task A2dp_service_opens_the_first_windows_remote_audio_target()
+    {
+        await using var service = new A2dpSinkService();
+        var targets = await service.GetAvailableDevicesAsync();
+        if (targets.Count == 0)
+        {
+            return;
+        }
+
+        var opened = await service.ConnectAsync(targets[0].Id);
+        try
+        {
+            Assert.True(opened);
+            Assert.Equal(MediaAudioSinkState.Opened, service.State);
+        }
+        finally
+        {
+            await service.DisconnectAsync();
+        }
+    }
 }

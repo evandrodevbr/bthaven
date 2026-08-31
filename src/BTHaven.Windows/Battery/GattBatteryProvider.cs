@@ -1,6 +1,7 @@
 using BTHaven.Core.Battery;
 using BTHaven.Core.Contracts;
 using BTHaven.Core.Devices;
+using BTHaven.Windows.Diagnostics;
 using Windows.Devices.Bluetooth;
 using Windows.Devices.Bluetooth.GenericAttributeProfile;
 using Windows.Foundation;
@@ -12,6 +13,12 @@ public sealed class GattBatteryProvider : IBatteryProvider, IAsyncDisposable
 {
     private readonly object sync = new();
     private readonly Dictionary<string, Subscription> subscriptions = new(StringComparer.OrdinalIgnoreCase);
+    private readonly IWindowsDiagnosticLogger logger;
+
+    public GattBatteryProvider(IWindowsDiagnosticLogger? logger = null)
+    {
+        this.logger = logger ?? NullDiagnosticLogger.Instance;
+    }
 
     public string Name => "gatt-0x180f-0x2a19";
 
@@ -23,15 +30,32 @@ public sealed class GattBatteryProvider : IBatteryProvider, IAsyncDisposable
     {
         ArgumentNullException.ThrowIfNull(device);
         cancellationToken.ThrowIfCancellationRequested();
+        logger.Debug("Battery.Gatt.QueryStarted", new Dictionary<string, object?>
+        {
+            ["deviceId"] = device.Id,
+            ["name"] = device.Name,
+            ["serviceUuid"] = GattServiceUuids.Battery,
+            ["characteristicUuid"] = GattCharacteristicUuids.BatteryLevel,
+        });
 
         if (device.Transport == BluetoothTransport.Classic)
         {
+            logger.Info("Battery.Gatt.Unavailable", new Dictionary<string, object?>
+            {
+                ["deviceId"] = device.Id,
+                ["reason"] = "Device transport is Bluetooth Classic",
+            });
             return BatteryState.Unavailable(Name);
         }
 
         var bluetoothDevice = await BluetoothLEDevice.FromIdAsync(device.Id);
         if (bluetoothDevice is null)
         {
+            logger.Info("Battery.Gatt.Unavailable", new Dictionary<string, object?>
+            {
+                ["deviceId"] = device.Id,
+                ["reason"] = "BluetoothLEDevice.FromIdAsync returned null",
+            });
             return BatteryState.Unavailable(Name);
         }
 
@@ -40,8 +64,20 @@ public sealed class GattBatteryProvider : IBatteryProvider, IAsyncDisposable
             var servicesResult = await bluetoothDevice.GetGattServicesForUuidAsync(
                 GattServiceUuids.Battery,
                 BluetoothCacheMode.Uncached);
+            logger.Debug("Battery.Gatt.ServiceQuery", new Dictionary<string, object?>
+            {
+                ["deviceId"] = device.Id,
+                ["status"] = servicesResult.Status.ToString(),
+                ["count"] = servicesResult.Services.Count,
+            });
             if (servicesResult.Status != GattCommunicationStatus.Success || servicesResult.Services.Count == 0)
             {
+                logger.Info("Battery.Gatt.Unavailable", new Dictionary<string, object?>
+                {
+                    ["deviceId"] = device.Id,
+                    ["reason"] = "Battery Service was not returned",
+                    ["status"] = servicesResult.Status.ToString(),
+                });
                 return BatteryState.Unavailable(Name);
             }
 
@@ -50,6 +86,13 @@ public sealed class GattBatteryProvider : IBatteryProvider, IAsyncDisposable
                 var characteristicsResult = await service.GetCharacteristicsForUuidAsync(
                     GattCharacteristicUuids.BatteryLevel,
                     BluetoothCacheMode.Uncached);
+                logger.Debug("Battery.Gatt.CharacteristicQuery", new Dictionary<string, object?>
+                {
+                    ["deviceId"] = device.Id,
+                    ["serviceUuid"] = service.Uuid,
+                    ["status"] = characteristicsResult.Status.ToString(),
+                    ["count"] = characteristicsResult.Characteristics.Count,
+                });
                 if (characteristicsResult.Status != GattCommunicationStatus.Success)
                 {
                     continue;
@@ -58,13 +101,30 @@ public sealed class GattBatteryProvider : IBatteryProvider, IAsyncDisposable
                 foreach (var characteristic in characteristicsResult.Characteristics)
                 {
                     var readResult = await characteristic.ReadValueAsync(BluetoothCacheMode.Uncached);
+                    logger.Debug("Battery.Gatt.ReadResult", new Dictionary<string, object?>
+                    {
+                        ["deviceId"] = device.Id,
+                        ["status"] = readResult.Status.ToString(),
+                        ["valueLength"] = readResult.Value?.Length,
+                    });
                     if (readResult.Status == GattCommunicationStatus.Success && TryReadLevel(readResult.Value, out var level))
                     {
-                        return CreateState(level);
+                        var state = CreateState(level);
+                        logger.Info("Battery.Gatt.Report", new Dictionary<string, object?>
+                        {
+                            ["deviceId"] = device.Id,
+                            ["percentage"] = state.Percentage,
+                        });
+                        return state;
                     }
                 }
             }
 
+            logger.Info("Battery.Gatt.Unavailable", new Dictionary<string, object?>
+            {
+                ["deviceId"] = device.Id,
+                ["reason"] = "Battery Level characteristic did not return a usable value",
+            });
             return BatteryState.Unavailable(Name);
         }
         finally
@@ -80,14 +140,29 @@ public sealed class GattBatteryProvider : IBatteryProvider, IAsyncDisposable
     {
         ArgumentNullException.ThrowIfNull(device);
         cancellationToken.ThrowIfCancellationRequested();
+        logger.Debug("Battery.Gatt.SubscribeStarted", new Dictionary<string, object?>
+        {
+            ["deviceId"] = device.Id,
+            ["name"] = device.Name,
+        });
         if (device.Transport == BluetoothTransport.Classic)
         {
+            logger.Info("Battery.Gatt.SubscribeUnavailable", new Dictionary<string, object?>
+            {
+                ["deviceId"] = device.Id,
+                ["reason"] = "Device transport is Bluetooth Classic",
+            });
             return false;
         }
 
         var bluetoothDevice = await BluetoothLEDevice.FromIdAsync(device.Id);
         if (bluetoothDevice is null)
         {
+            logger.Info("Battery.Gatt.SubscribeUnavailable", new Dictionary<string, object?>
+            {
+                ["deviceId"] = device.Id,
+                ["reason"] = "BluetoothLEDevice.FromIdAsync returned null",
+            });
             return false;
         }
 
@@ -97,8 +172,20 @@ public sealed class GattBatteryProvider : IBatteryProvider, IAsyncDisposable
             var servicesResult = await bluetoothDevice.GetGattServicesForUuidAsync(
                 GattServiceUuids.Battery,
                 BluetoothCacheMode.Uncached);
+            logger.Debug("Battery.Gatt.Subscribe.ServiceQuery", new Dictionary<string, object?>
+            {
+                ["deviceId"] = device.Id,
+                ["status"] = servicesResult.Status.ToString(),
+                ["count"] = servicesResult.Services.Count,
+            });
             if (servicesResult.Status != GattCommunicationStatus.Success || servicesResult.Services.Count == 0)
             {
+                logger.Info("Battery.Gatt.SubscribeUnavailable", new Dictionary<string, object?>
+                {
+                    ["deviceId"] = device.Id,
+                    ["reason"] = "Battery Service was not returned",
+                    ["status"] = servicesResult.Status.ToString(),
+                });
                 return false;
             }
 
@@ -107,6 +194,13 @@ public sealed class GattBatteryProvider : IBatteryProvider, IAsyncDisposable
                 var characteristicsResult = await service.GetCharacteristicsForUuidAsync(
                     GattCharacteristicUuids.BatteryLevel,
                     BluetoothCacheMode.Uncached);
+                logger.Debug("Battery.Gatt.Subscribe.CharacteristicQuery", new Dictionary<string, object?>
+                {
+                    ["deviceId"] = device.Id,
+                    ["serviceUuid"] = service.Uuid,
+                    ["status"] = characteristicsResult.Status.ToString(),
+                    ["count"] = characteristicsResult.Characteristics.Count,
+                });
                 if (characteristicsResult.Status != GattCommunicationStatus.Success)
                 {
                     continue;
@@ -117,6 +211,11 @@ public sealed class GattBatteryProvider : IBatteryProvider, IAsyncDisposable
                     || candidate.CharacteristicProperties.HasFlag(GattCharacteristicProperties.Indicate));
                 if (characteristic is null)
                 {
+                    logger.Info("Battery.Gatt.SubscribeUnavailable", new Dictionary<string, object?>
+                    {
+                        ["deviceId"] = device.Id,
+                        ["reason"] = "Battery Level characteristic does not support notifications",
+                    });
                     continue;
                 }
 
@@ -124,10 +223,20 @@ public sealed class GattBatteryProvider : IBatteryProvider, IAsyncDisposable
                 {
                     if (!TryReadLevel(args.CharacteristicValue, out var level))
                     {
+                        logger.Warning("Battery.Gatt.Notification.InvalidValue", new Dictionary<string, object?>
+                        {
+                            ["deviceId"] = device.Id,
+                            ["valueLength"] = args.CharacteristicValue?.Length,
+                        });
                         return;
                     }
 
                     var state = CreateState(level);
+                    logger.Info("Battery.Gatt.Notification.ValueChanged", new Dictionary<string, object?>
+                    {
+                        ["deviceId"] = device.Id,
+                        ["percentage"] = state.Percentage,
+                    });
                     onChanged?.Invoke(state);
                     BatteryChanged?.Invoke(this, state);
                 };
@@ -136,6 +245,12 @@ public sealed class GattBatteryProvider : IBatteryProvider, IAsyncDisposable
                     ? GattClientCharacteristicConfigurationDescriptorValue.Notify
                     : GattClientCharacteristicConfigurationDescriptorValue.Indicate;
                 var status = await characteristic.WriteClientCharacteristicConfigurationDescriptorAsync(configuration);
+                logger.Debug("Battery.Gatt.Subscribe.ConfigurationResult", new Dictionary<string, object?>
+                {
+                    ["deviceId"] = device.Id,
+                    ["configuration"] = configuration.ToString(),
+                    ["status"] = status.ToString(),
+                });
                 if (status != GattCommunicationStatus.Success)
                 {
                     characteristic.ValueChanged -= handler;
@@ -152,9 +267,19 @@ public sealed class GattBatteryProvider : IBatteryProvider, IAsyncDisposable
                     subscriptions[device.Id] = subscription;
                 }
                 createdSubscription = subscription;
+                logger.Info("Battery.Gatt.SubscribeCompleted", new Dictionary<string, object?>
+                {
+                    ["deviceId"] = device.Id,
+                    ["configuration"] = configuration.ToString(),
+                });
                 return true;
             }
 
+            logger.Info("Battery.Gatt.SubscribeUnavailable", new Dictionary<string, object?>
+            {
+                ["deviceId"] = device.Id,
+                ["reason"] = "No notifiable Battery Level characteristic was configured",
+            });
             return false;
         }
         finally
@@ -179,6 +304,10 @@ public sealed class GattBatteryProvider : IBatteryProvider, IAsyncDisposable
         {
             subscription.Dispose();
         }
+        logger.Info("Battery.Gatt.ProviderDisposed", new Dictionary<string, object?>
+        {
+            ["subscriptionCount"] = current.Length,
+        });
         return ValueTask.CompletedTask;
     }
 

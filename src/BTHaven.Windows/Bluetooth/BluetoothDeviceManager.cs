@@ -49,27 +49,42 @@ public sealed class BluetoothDeviceManager : IBluetoothDeviceService, IAsyncDisp
         BluetoothDeviceFilter filter = BluetoothDeviceFilter.Connected,
         CancellationToken cancellationToken = default)
     {
+        logger.Info("Bluetooth.Snapshot.Requested", new Dictionary<string, object?>
+        {
+            ["filter"] = filter.ToString(),
+        });
         await EnsureStartedAsync(cancellationToken).ConfigureAwait(false);
 
+        IReadOnlyList<BluetoothDeviceModel> result;
         lock (sync)
         {
-            return BuildModelsLocked()
+            result = BuildModelsLocked()
                 .Values
                 .Where(device => BluetoothDeviceFilterMatcher.Matches(device, filter))
                 .OrderByDescending(device => device.IsConnected)
                 .ThenBy(device => device.Name, StringComparer.OrdinalIgnoreCase)
                 .ToArray();
         }
+        logger.Info("Bluetooth.Snapshot.Completed", new Dictionary<string, object?>
+        {
+            ["filter"] = filter.ToString(),
+            ["count"] = result.Count,
+            ["connected"] = result.Count(device => device.IsConnected),
+            ["paired"] = result.Count(device => device.IsPaired),
+        });
+        return result;
     }
 
     public async IAsyncEnumerable<BluetoothDeviceChange> WatchAsync(
         [EnumeratorCancellation] CancellationToken cancellationToken = default)
     {
+        logger.Info("Bluetooth.Watch.Subscribed");
         await EnsureStartedAsync(cancellationToken).ConfigureAwait(false);
         await foreach (var change in changes.Reader.ReadAllAsync(cancellationToken).ConfigureAwait(false))
         {
             yield return change;
         }
+        logger.Info("Bluetooth.Watch.Completed");
     }
 
     public ValueTask DisposeAsync()
@@ -306,6 +321,14 @@ public sealed class BluetoothDeviceManager : IBluetoothDeviceService, IAsyncDisp
             ["isPaired"] = observation.IsPaired,
             ["isConnected"] = observation.IsConnected,
             ["isPresent"] = observation.IsPresent,
+            ["address"] = observation.Address,
+            ["containerId"] = observation.ContainerId,
+            ["manufacturer"] = observation.Manufacturer,
+            ["model"] = observation.Model,
+            ["rssi"] = observation.Rssi,
+            ["category"] = observation.Category.ToString(),
+            ["categories"] = observation.Categories,
+            ["capabilities"] = observation.Capabilities.ToString(),
             ["logicalKey"] = newLogicalKey,
         });
     }
