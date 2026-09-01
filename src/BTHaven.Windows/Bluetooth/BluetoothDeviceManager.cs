@@ -445,10 +445,15 @@ public sealed class BluetoothDeviceManager : IBluetoothDeviceService, IAsyncDisp
     private bool TryGetReliableLogicalKey(BluetoothDeviceObservation observation, out string logicalKey)
     {
         var containerId = NormalizeContainerId(observation.ContainerId);
-        if (containerId.Length > 0
-            && reliableIdentityLogicalKeys.TryGetValue($"container:{containerId}", out logicalKey!))
+        if (containerId.Length > 0)
         {
-            return true;
+            if (reliableIdentityLogicalKeys.TryGetValue($"container:{containerId}", out logicalKey!))
+            {
+                return true;
+            }
+
+            logicalKey = string.Empty;
+            return false;
         }
 
         var address = BluetoothDeviceIdentity.NormalizeAddress(observation.Address);
@@ -515,11 +520,9 @@ public sealed class BluetoothDeviceManager : IBluetoothDeviceService, IAsyncDisp
     {
         var previousContainerId = NormalizeContainerId(previous.ContainerId);
         var currentContainerId = NormalizeContainerId(current.ContainerId);
-        if (previousContainerId.Length > 0
-            && currentContainerId.Length > 0
-            && string.Equals(previousContainerId, currentContainerId, StringComparison.Ordinal))
+        if (previousContainerId.Length > 0 && currentContainerId.Length > 0)
         {
-            return true;
+            return string.Equals(previousContainerId, currentContainerId, StringComparison.Ordinal);
         }
 
         var previousAddress = BluetoothDeviceIdentity.NormalizeAddress(previous.Address);

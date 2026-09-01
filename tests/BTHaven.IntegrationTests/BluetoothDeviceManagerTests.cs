@@ -194,6 +194,27 @@ public sealed class BluetoothDeviceManagerTests
     }
 
     [Fact]
+    public async Task Conflicting_container_ids_with_same_address_remain_separate_models()
+    {
+        await using var manager = new BluetoothDeviceManager();
+        var first = Observation("endpoint-a", BluetoothTransport.Classic, "container-a", "001122334455");
+        var second = Observation("endpoint-b", BluetoothTransport.Classic, "container-b", "001122334455");
+
+        manager.ApplyObservationForTesting(first);
+        manager.ApplyObservationForTesting(second);
+
+        var models = manager.GetModelsForTesting();
+        Assert.Equal(2, models.Count);
+        Assert.Contains(models, model => model.Id == "container:CONTAINER-A");
+        Assert.Contains(models, model => model.Id == "container:CONTAINER-B");
+        Assert.Equal(
+            2,
+            Enumerable.Range(0, 2)
+                .Select(_ => ReadChange(manager).Kind)
+                .Count(kind => kind == BluetoothDeviceChangeKind.Added));
+    }
+
+    [Fact]
     public async Task Endpoint_identity_change_emits_removed_old_then_added_new()
     {
         await using var manager = new BluetoothDeviceManager();
