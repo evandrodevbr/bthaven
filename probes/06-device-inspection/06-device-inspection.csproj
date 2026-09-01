@@ -1,0 +1,14 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0-windows10.0.26100.0</TargetFramework>
+    <RootNamespace>BTHaven.Probes.DeviceInspection</RootNamespace>
+    <AssemblyName>BTHaven.Probe.DeviceInspection</AssemblyName>
+    <SupportedOSPlatformVersion>10.0.22621.0</SupportedOSPlatformVersion>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="../Common/BTHaven.Probes.Common.csproj" />
+    <ProjectReference Include="../../src/BTHaven.Core/BTHaven.Core.csproj" />
+    <ProjectReference Include="../../src/BTHaven.Windows/BTHaven.Windows.csproj" />
+  </ItemGroup>
+</Project>
