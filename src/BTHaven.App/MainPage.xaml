@@ -25,7 +25,7 @@
         <Grid Grid.Row="0" ColumnDefinitions="*,Auto" ColumnSpacing="24" VerticalAlignment="Center">
             <StackPanel Spacing="4">
                 <TextBlock Text="Bluetooth Hub" FontSize="30" FontWeight="SemiBold" />
-                <TextBlock Text="Controle local de dispositivos Bluetooth e áudio" Opacity="0.72" />
+                <TextBlock Text="Observação real do Windows para Bluetooth Classic/LE, perfis, bateria e áudio" Opacity="0.72" TextWrapping="Wrap" />
             </StackPanel>
             <StackPanel Grid.Column="1" Orientation="Horizontal" HorizontalAlignment="Right" Spacing="10" Margin="0,0,8,0">
                 <ComboBox x:Name="FilterComboBox" Width="170" SelectionChanged="FilterComboBox_SelectionChanged">
@@ -55,7 +55,7 @@
                         <ListView x:Name="DeviceList" Margin="6,0,6,6" SelectionMode="Single" SelectionChanged="DeviceList_SelectionChanged">
                             <ListView.ItemTemplate>
                                 <DataTemplate>
-                                    <Grid Padding="10" ColumnDefinitions="38,*,Auto" ColumnSpacing="10">
+                                    <Grid Padding="10" ColumnDefinitions="38,*,Auto,Auto" ColumnSpacing="10">
                                         <FontIcon Glyph="{Binding IconGlyph}" FontSize="22" VerticalAlignment="Center" />
                                         <StackPanel Grid.Column="1" Spacing="2" VerticalAlignment="Center">
                                             <TextBlock Text="{Binding Name}" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" />
@@ -63,6 +63,14 @@
                                             <TextBlock Text="{Binding StatusText}" FontSize="12" Foreground="{Binding StatusBrush}" />
                                         </StackPanel>
                                         <TextBlock Grid.Column="2" Text="{Binding BatteryText}" Style="{StaticResource CaptionText}" VerticalAlignment="Center" />
+                                        <ToggleSwitch Grid.Column="3"
+                                                      Tag="{Binding Id}"
+                                                      IsOn="{Binding MediaEnabled}"
+                                                      IsEnabled="{Binding MediaToggleEnabled}"
+                                                      Toggled="MediaToggleSwitch_Toggled"
+                                                      OnContent=""
+                                                      OffContent=""
+                                                      AutomationProperties.Name="Áudio de mídia" />
                                     </Grid>
                                 </DataTemplate>
                             </ListView.ItemTemplate>
@@ -106,6 +114,20 @@
                         <TextBlock Text="Capacidades observadas" Style="{StaticResource SectionHeading}" />
                         <TextBlock x:Name="CapabilitiesText" Text="—" TextWrapping="Wrap" />
 
+                        <TextBlock Text="Inspeção detalhada" Style="{StaticResource SectionHeading}" />
+                        <StackPanel Orientation="Horizontal" Spacing="10">
+                            <Button x:Name="InspectButton" Content="Inspecionar tudo" Click="InspectButton_Click" IsEnabled="False" />
+                            <TextBlock x:Name="InspectionStatusText" Text="Nenhuma inspeção executada" Style="{StaticResource CaptionText}" VerticalAlignment="Center" TextWrapping="Wrap" />
+                        </StackPanel>
+                        <TextBox x:Name="InspectionTextBox"
+                                 Text="Selecione um dispositivo e execute a inspeção detalhada."
+                                 IsReadOnly="True"
+                                 AcceptsReturn="True"
+                                 TextWrapping="Wrap"
+                                 MinHeight="220"
+                                 MaxHeight="480"
+                                 FontFamily="Cascadia Mono" />
+
                         <TextBlock Text="Áudio de mídia" Style="{StaticResource SectionHeading}" />
                         <TextBlock Text="O Windows pode transformar o PC em um destino A2DP usando AudioPlaybackConnection. O telefone precisa enviar a mídia para o PC; o Windows reproduz no endpoint padrão." TextWrapping="Wrap" Opacity="0.72" />
                         <TextBlock x:Name="A2dpTargetText" Text="Alvo A2DP: aguardando seleção" TextWrapping="Wrap" Style="{StaticResource CaptionText}" />
@@ -113,6 +135,13 @@
                         <CheckBox x:Name="AutoReconnectCheckBox" Content="Reconectar áudio automaticamente" IsChecked="True" Checked="AutoReconnectCheckBox_Changed" Unchecked="AutoReconnectCheckBox_Changed" />
                         <ComboBox x:Name="OutputEndpointComboBox" Header="Endpoint padrão observado" DisplayMemberPath="Name" SelectionChanged="OutputEndpointComboBox_SelectionChanged" />
                         <TextBlock Text="A AudioPlaybackConnection pública não aceita endpoint arbitrário por conexão. Para ouvir no headset, deixe-o como dispositivo padrão de reprodução do Windows." TextWrapping="Wrap" Style="{StaticResource CaptionText}" />
+
+                        <TextBlock Text="Volume remoto do smartphone" Style="{StaticResource SectionHeading}" />
+                        <TextBlock Text="O volume remoto só é habilitado quando o Windows expõe uma rota oficial de controle AVRCP para este dispositivo. Volume do endpoint do PC não é tratado como volume do telefone." TextWrapping="Wrap" Opacity="0.72" />
+                        <InfoBar x:Name="RemoteVolumeInfoBar" IsOpen="True" Severity="Informational" Title="Volume remoto aguardando consulta" Message="Selecione um dispositivo para consultar a capacidade real." IsClosable="False" />
+                        <TextBlock x:Name="RemoteVolumeStatusText" Text="Volume remoto: aguardando seleção" TextWrapping="Wrap" Style="{StaticResource CaptionText}" />
+                        <Slider x:Name="RemoteVolumeSlider" Header="Nível solicitado" Minimum="0" Maximum="1" Value="0.5" StepFrequency="0.05" IsEnabled="False" />
+                        <Button x:Name="RemoteVolumeButton" Content="Aplicar volume no smartphone" Click="RemoteVolumeButton_Click" IsEnabled="False" HorizontalAlignment="Left" />
 
                         <TextBlock Text="Chamadas" Style="{StaticResource SectionHeading}" />
                         <InfoBar x:Name="HfpStatusInfoBar" IsOpen="True" Severity="Warning" Title="HFP aguardando teste" Message="Selecione um smartphone e use o botão para solicitar o acesso real ao transporte telefônico." IsClosable="False" />

@@ -8,6 +8,7 @@
     <Project Path="probes/03-a2dp-sink/03-a2dp-sink.csproj" />
     <Project Path="probes/04-phone-hfp/04-phone-hfp.csproj" />
     <Project Path="probes/05-call-audio-routing/05-call-audio-routing.csproj" />
+    <Project Path="probes/06-device-inspection/06-device-inspection.csproj" />
   </Folder>
   <Folder Name="/probes/Common/">
     <Project Path="probes/Common/BTHaven.Probes.Common.csproj" />

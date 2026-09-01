@@ -39,4 +39,26 @@ public sealed class GattBatteryProviderTests
 
         Assert.Equal(["detach", "characteristic", "service", "device"], calls);
     }
+    [Fact]
+    [Trait("Category", "Integration")]
+    public void Unvisited_service_cleanup_disposes_each_resource_once()
+    {
+        var first = new DisposableResource();
+        var second = new DisposableResource();
+        var unvisited = new HashSet<DisposableResource> { first, second };
+
+        GattBatteryProvider.DisposeUnvisitedServices(unvisited);
+        GattBatteryProvider.DisposeUnvisitedServices(unvisited);
+
+        Assert.Equal(1, first.DisposeCount);
+        Assert.Equal(1, second.DisposeCount);
+        Assert.Empty(unvisited);
+    }
+
+    private sealed class DisposableResource : IDisposable
+    {
+        public int DisposeCount { get; private set; }
+
+        public void Dispose() => DisposeCount++;
+    }
 }

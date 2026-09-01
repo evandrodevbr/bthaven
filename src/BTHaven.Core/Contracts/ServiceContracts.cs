@@ -14,6 +14,13 @@ public interface IBluetoothDeviceService
         CancellationToken cancellationToken = default);
 }
 
+public interface IBluetoothDeviceInspector
+{
+    Task<BluetoothDeviceInspectionSnapshot> InspectAsync(
+        BluetoothDeviceModel device,
+        CancellationToken cancellationToken = default);
+}
+
 public interface IBatteryProvider
 {
     string Name { get; }
@@ -59,6 +66,18 @@ public interface IAudioEndpointService
 {
     Task<IReadOnlyList<AudioEndpointModel>> GetEndpointsAsync(
         AudioEndpointDirection direction,
+        CancellationToken cancellationToken = default);
+}
+
+public interface IRemoteVolumeService
+{
+    Task<RemoteVolumeStatus> GetStatusAsync(
+        BluetoothDeviceModel device,
+        CancellationToken cancellationToken = default);
+
+    Task<RemoteVolumeStatus> SetVolumeAsync(
+        BluetoothDeviceModel device,
+        float level,
         CancellationToken cancellationToken = default);
 }
 

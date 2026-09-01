@@ -6,6 +6,40 @@ public enum AudioEndpointDirection
     Capture,
 }
 
+public enum RemoteVolumeAvailability
+{
+    Unknown,
+    Available,
+    NotExposed,
+    Failed,
+}
+
+public sealed record RemoteVolumeStatus
+{
+    public required RemoteVolumeAvailability Availability { get; init; }
+    public required string Source { get; init; }
+    public float? Level { get; init; }
+    public DateTimeOffset ObservedAt { get; init; } = DateTimeOffset.UtcNow;
+    public string? HResult { get; init; }
+    public string? Message { get; init; }
+    public bool CanControl => Availability == RemoteVolumeAvailability.Available;
+
+    public static RemoteVolumeStatus NotExposed(string source, string message) => new()
+    {
+        Availability = RemoteVolumeAvailability.NotExposed,
+        Source = source,
+        Message = message,
+    };
+
+    public static void ValidateLevel(float level)
+    {
+        if (float.IsNaN(level) || float.IsInfinity(level) || level is < 0f or > 1f)
+        {
+            throw new ArgumentOutOfRangeException(nameof(level), level, "Volume level must be between 0 and 1.");
+        }
+    }
+}
+
 public enum MediaAudioSinkState
 {
     Disabled,

@@ -6,7 +6,7 @@ namespace BTHaven_App;
 
 public sealed class DeviceRowViewModel
 {
-    public DeviceRowViewModel(BluetoothDeviceModel model)
+    public DeviceRowViewModel(BluetoothDeviceModel model, bool mediaEnabled = false)
     {
         Id = model.Id;
         Name = model.Name;
@@ -16,6 +16,13 @@ public sealed class DeviceRowViewModel
             ? $"{percentage}%"
             : "—";
         IconGlyph = BuildGlyph(model.Category);
+        MediaToggleEnabled = model.IsPaired
+            && model.IsPresent
+            && (model.Category is BluetoothDeviceCategory.Smartphone
+                or BluetoothDeviceCategory.Headphones
+                or BluetoothDeviceCategory.Speaker
+                || model.Capabilities.HasFlag(BluetoothCapabilities.MediaAudio));
+        MediaEnabled = mediaEnabled;
         StatusBrush = new SolidColorBrush(model.IsConnected
             ? ColorHelper.FromArgb(255, 76, 188, 118)
             : ColorHelper.FromArgb(255, 142, 151, 164));
@@ -28,6 +35,9 @@ public sealed class DeviceRowViewModel
     public string BatteryText { get; }
     public string IconGlyph { get; }
     public SolidColorBrush StatusBrush { get; }
+
+    public bool MediaToggleEnabled { get; }
+    public bool MediaEnabled { get; }
 
     private static string BuildSummary(BluetoothDeviceModel model)
     {
