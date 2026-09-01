@@ -38,22 +38,30 @@ public sealed class GattBatteryProvider : IBatteryProvider, IAsyncDisposable
             ["characteristicUuid"] = GattCharacteristicUuids.BatteryLevel,
         });
 
-        if (device.Transport == BluetoothTransport.Classic)
+        var endpoint = BluetoothEndpointSelection.SelectGatt(device);
+        if (endpoint is null)
         {
             logger.Info("Battery.Gatt.Unavailable", new Dictionary<string, object?>
             {
                 ["deviceId"] = device.Id,
-                ["reason"] = "Device transport is Bluetooth Classic",
+                ["reason"] = "No Low Energy endpoint reference",
             });
             return BatteryState.Unavailable(Name);
         }
 
-        var bluetoothDevice = await BluetoothLEDevice.FromIdAsync(device.Id);
+        logger.Debug("Battery.Gatt.EndpointResolved", new Dictionary<string, object?>
+        {
+            ["deviceId"] = device.Id,
+            ["endpointId"] = endpoint.Id,
+            ["transport"] = endpoint.Transport.ToString(),
+        });
+        var bluetoothDevice = await BluetoothLEDevice.FromIdAsync(endpoint.Id);
         if (bluetoothDevice is null)
         {
             logger.Info("Battery.Gatt.Unavailable", new Dictionary<string, object?>
             {
                 ["deviceId"] = device.Id,
+                ["endpointId"] = endpoint.Id,
                 ["reason"] = "BluetoothLEDevice.FromIdAsync returned null",
             });
             return BatteryState.Unavailable(Name);
@@ -145,22 +153,30 @@ public sealed class GattBatteryProvider : IBatteryProvider, IAsyncDisposable
             ["deviceId"] = device.Id,
             ["name"] = device.Name,
         });
-        if (device.Transport == BluetoothTransport.Classic)
+        var endpoint = BluetoothEndpointSelection.SelectGatt(device);
+        if (endpoint is null)
         {
             logger.Info("Battery.Gatt.SubscribeUnavailable", new Dictionary<string, object?>
             {
                 ["deviceId"] = device.Id,
-                ["reason"] = "Device transport is Bluetooth Classic",
+                ["reason"] = "No Low Energy endpoint reference",
             });
             return false;
         }
 
-        var bluetoothDevice = await BluetoothLEDevice.FromIdAsync(device.Id);
+        logger.Debug("Battery.Gatt.SubscribeEndpointResolved", new Dictionary<string, object?>
+        {
+            ["deviceId"] = device.Id,
+            ["endpointId"] = endpoint.Id,
+            ["transport"] = endpoint.Transport.ToString(),
+        });
+        var bluetoothDevice = await BluetoothLEDevice.FromIdAsync(endpoint.Id);
         if (bluetoothDevice is null)
         {
             logger.Info("Battery.Gatt.SubscribeUnavailable", new Dictionary<string, object?>
             {
                 ["deviceId"] = device.Id,
+                ["endpointId"] = endpoint.Id,
                 ["reason"] = "BluetoothLEDevice.FromIdAsync returned null",
             });
             return false;

@@ -41,6 +41,32 @@ public sealed record BluetoothEndpointReference
     public string? Address { get; init; }
 }
 
+public static class BluetoothEndpointSelection
+{
+    public static BluetoothEndpointReference? SelectGatt(BluetoothDeviceModel device)
+    {
+        ArgumentNullException.ThrowIfNull(device);
+
+        return device.Endpoints
+            .Where(endpoint => !string.IsNullOrWhiteSpace(endpoint.Id)
+                && endpoint.Transport is BluetoothTransport.LowEnergy or BluetoothTransport.DualMode)
+            .OrderBy(endpoint => endpoint.Transport == BluetoothTransport.LowEnergy ? 0 : 1)
+            .ThenBy(endpoint => endpoint.Id, StringComparer.OrdinalIgnoreCase)
+            .FirstOrDefault();
+    }
+
+    public static IReadOnlyList<BluetoothEndpointReference> SelectBatteryPropertyEndpoints(BluetoothDeviceModel device)
+    {
+        ArgumentNullException.ThrowIfNull(device);
+
+        return device.Endpoints
+            .Where(endpoint => !string.IsNullOrWhiteSpace(endpoint.Id))
+            .OrderBy(endpoint => endpoint.Id, StringComparer.OrdinalIgnoreCase)
+            .ThenBy(endpoint => endpoint.Transport)
+            .ToArray();
+    }
+}
+
 public sealed record BluetoothDeviceModel
 {
     public required string Id { get; init; }

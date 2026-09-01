@@ -32,80 +32,120 @@ public sealed class WindowsDevicePropertiesBatteryProvider : IBatteryProvider
         ArgumentNullException.ThrowIfNull(device);
         cancellationToken.ThrowIfCancellationRequested();
 
-        var selector = $"System.Devices.Aep.AepId:=\"{EscapeAqs(device.Id)}\"";
-        logger.Debug("Battery.WindowsProperties.QueryStarted", new Dictionary<string, object?>
-        {
-            ["deviceId"] = device.Id,
-            ["name"] = device.Name,
-            ["selector"] = selector,
-            ["properties"] = RequestedProperties,
-        });
-        var matches = await DeviceInformation.FindAllAsync(selector, RequestedProperties);
-        var info = matches.FirstOrDefault();
-        if (info is null)
+        var endpoints = BluetoothEndpointSelection.SelectBatteryPropertyEndpoints(device);
+        if (endpoints.Count == 0)
         {
             logger.Info("Battery.WindowsProperties.Unavailable", new Dictionary<string, object?>
             {
                 ["deviceId"] = device.Id,
-                ["reason"] = "No matching DeviceInformation",
+                ["reason"] = "No endpoint reference",
             });
             return BatteryState.Unavailable(Name);
         }
 
-        cancellationToken.ThrowIfCancellationRequested();
-        var batteryLife = WindowsDevicePropertyReader.Int32(info.Properties, WindowsDevicePropertyNames.BatteryLife);
-        var batteryPlusCharging = WindowsDevicePropertyReader.Int32(info.Properties, WindowsDevicePropertyNames.BatteryPlusCharging);
-        var chargingRaw = WindowsDevicePropertyReader.String(info.Properties, WindowsDevicePropertyNames.ChargingState);
-        var charging = ParseChargingState(chargingRaw);
-        logger.Debug("Battery.WindowsProperties.Values", new Dictionary<string, object?>
+        foreach (var endpoint in endpoints)
         {
-            ["deviceId"] = device.Id,
-            ["batteryLife"] = batteryLife,
-            ["batteryPlusCharging"] = batteryPlusCharging,
-            ["chargingState"] = chargingRaw,
-            ["parsedCharging"] = charging,
-        });
-
-        var percentage = batteryLife is >= 0 and <= 100
-            ? batteryLife
-            : batteryPlusCharging is >= 0 and <= 100
-                ? batteryPlusCharging
-                : null;
-
-        if (charging is null && batteryPlusCharging is >= 101)
-        {
-            charging = true;
-        }
-        else if (charging is null && batteryPlusCharging is >= 0 and <= 100)
-        {
-            charging = false;
-        }
-
-        if (percentage is null && charging is null)
-        {
-            logger.Info("Battery.WindowsProperties.Unavailable", new Dictionary<string, object?>
+            cancellationToken.ThrowIfCancellationRequested();
+            var selector = $"System.Devices.Aep.AepId:=\"{EscapeAqs(endpoint.Id)}\"";
+            logger.Debug("Battery.WindowsProperties.QueryStarted", new Dictionary<string, object?>
             {
                 ["deviceId"] = device.Id,
-                ["reason"] = "Properties exposed no usable percentage or charging state",
+                ["endpointId"] = endpoint.Id,
+                ["name"] = device.Name,
+                ["selector"] = selector,
+                ["properties"] = RequestedProperties,
             });
-            return BatteryState.Unavailable(Name);
+
+            IReadOnlyList<DeviceInformation> matches;
+            try
+            {
+                matches = await DeviceInformation.FindAllAsync(selector, RequestedProperties);
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                throw;
+            }
+            catch (Exception exception)
+            {
+                logger.Error("Battery.WindowsProperties.QueryFailed", exception, new Dictionary<string, object?>
+                {
+                    ["deviceId"] = device.Id,
+                    ["endpointId"] = endpoint.Id,
+                });
+                continue;
+            }
+
+            var info = matches.FirstOrDefault();
+            if (info is null)
+            {
+                continue;
+            }
+
+            cancellationToken.ThrowIfCancellationRequested();
+            var batteryLife = WindowsDevicePropertyReader.Int32(info.Properties, WindowsDevicePropertyNames.BatteryLife);
+            var batteryPlusCharging = WindowsDevicePropertyReader.Int32(info.Properties, WindowsDevicePropertyNames.BatteryPlusCharging);
+            var chargingRaw = WindowsDevicePropertyReader.String(info.Properties, WindowsDevicePropertyNames.ChargingState);
+            var charging = ParseChargingState(chargingRaw);
+            logger.Debug("Battery.WindowsProperties.Values", new Dictionary<string, object?>
+            {
+                ["deviceId"] = device.Id,
+                ["endpointId"] = endpoint.Id,
+                ["batteryLife"] = batteryLife,
+                ["batteryPlusCharging"] = batteryPlusCharging,
+                ["chargingState"] = chargingRaw,
+                ["parsedCharging"] = charging,
+            });
+
+            var percentage = batteryLife is >= 0 and <= 100
+                ? batteryLife
+                : batteryPlusCharging is >= 0 and <= 100
+                    ? batteryPlusCharging
+                    : null;
+
+            if (charging is null && batteryPlusCharging is >= 101)
+            {
+                charging = true;
+            }
+            else if (charging is null && batteryPlusCharging is >= 0 and <= 100)
+            {
+                charging = false;
+            }
+
+            if (percentage is null && charging is null)
+            {
+                logger.Info("Battery.WindowsProperties.Unavailable", new Dictionary<string, object?>
+                {
+                    ["deviceId"] = device.Id,
+                    ["endpointId"] = endpoint.Id,
+                    ["reason"] = "Properties exposed no usable percentage or charging state",
+                });
+                continue;
+            }
+
+            var state = new BatteryState
+            {
+                Percentage = percentage,
+                IsCharging = charging,
+                Source = Name,
+                LastUpdated = DateTimeOffset.UtcNow,
+                Confidence = BatteryConfidence.High,
+            };
+            logger.Info("Battery.WindowsProperties.Report", new Dictionary<string, object?>
+            {
+                ["deviceId"] = device.Id,
+                ["endpointId"] = endpoint.Id,
+                ["percentage"] = state.Percentage,
+                ["isCharging"] = state.IsCharging,
+            });
+            return state;
         }
 
-        var state = new BatteryState
-        {
-            Percentage = percentage,
-            IsCharging = charging,
-            Source = Name,
-            LastUpdated = DateTimeOffset.UtcNow,
-            Confidence = BatteryConfidence.High,
-        };
-        logger.Info("Battery.WindowsProperties.Report", new Dictionary<string, object?>
+        logger.Info("Battery.WindowsProperties.Unavailable", new Dictionary<string, object?>
         {
             ["deviceId"] = device.Id,
-            ["percentage"] = state.Percentage,
-            ["isCharging"] = state.IsCharging,
+            ["reason"] = "No endpoint exposed a usable percentage or charging state",
         });
-        return state;
+        return BatteryState.Unavailable(Name);
     }
 
     private static bool? ParseChargingState(string? raw)

@@ -97,4 +97,51 @@ public sealed class BluetoothDeviceProjectionTests
         Assert.True(BluetoothDeviceFilterMatcher.Matches(mouse, BluetoothDeviceFilter.Peripherals));
         Assert.False(BluetoothDeviceFilterMatcher.Matches(mouse, BluetoothDeviceFilter.Audio));
     }
+    [Fact]
+    public void Gatt_selection_uses_a_real_low_energy_endpoint_instead_of_logical_id()
+    {
+        var device = new BluetoothDeviceModel
+        {
+            Id = "container:PHONE",
+            Name = "Phone",
+            Endpoints =
+            [
+                new BluetoothEndpointReference { Id = "classic-endpoint", Transport = BluetoothTransport.Classic },
+                new BluetoothEndpointReference { Id = "dual-endpoint", Transport = BluetoothTransport.DualMode },
+                new BluetoothEndpointReference { Id = "ble-endpoint", Transport = BluetoothTransport.LowEnergy },
+                new BluetoothEndpointReference { Id = string.Empty, Transport = BluetoothTransport.LowEnergy },
+            ],
+        };
+
+        var endpoint = BluetoothEndpointSelection.SelectGatt(device);
+
+        Assert.NotNull(endpoint);
+        Assert.Equal("ble-endpoint", endpoint!.Id);
+        Assert.NotEqual(device.Id, endpoint.Id);
+    }
+
+    [Fact]
+    public void Battery_property_selection_orders_real_endpoint_ids_deterministically()
+    {
+        var device = new BluetoothDeviceModel
+        {
+            Id = "container:PHONE",
+            Name = "Phone",
+            Endpoints =
+            [
+                new BluetoothEndpointReference { Id = "z-classic", Transport = BluetoothTransport.Classic },
+                new BluetoothEndpointReference { Id = "b-dual", Transport = BluetoothTransport.DualMode },
+                new BluetoothEndpointReference { Id = "a-low", Transport = BluetoothTransport.LowEnergy },
+                new BluetoothEndpointReference { Id = " ", Transport = BluetoothTransport.LowEnergy },
+            ],
+        };
+
+        var endpointIds = BluetoothEndpointSelection.SelectBatteryPropertyEndpoints(device)
+            .Select(endpoint => endpoint.Id)
+            .ToArray();
+
+        Assert.Equal(["a-low", "b-dual", "z-classic"], endpointIds);
+        Assert.DoesNotContain(device.Id, endpointIds);
+    }
+
 }
