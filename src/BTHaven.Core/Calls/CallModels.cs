@@ -32,6 +32,7 @@ public sealed record PhoneLineTransportActivationResult
     public bool Succeeded { get; init; }
     public required string Status { get; init; }
     public string? Message { get; init; }
+    public string? HResult { get; init; }
     public string? AccessStatus { get; init; }
     public bool IsRegistered { get; init; }
     public bool IsConnected { get; init; }

@@ -111,9 +111,10 @@ public sealed class HfpPhoneTransportServiceActivationTests
     [Fact]
     public async Task Activation_exception_returns_exception_status_and_cleans_candidate()
     {
+        var exception = new InvalidOperationException("access failure");
         var device = new FakeTransportDevice("transport-exception")
         {
-            AccessException = new InvalidOperationException("access failure"),
+            AccessException = exception,
         };
         await using var service = CreateService(device);
 
@@ -121,6 +122,7 @@ public sealed class HfpPhoneTransportServiceActivationTests
 
         Assert.False(result.Succeeded);
         Assert.Equal("Exception", result.Status);
+        Assert.Equal($"0x{exception.HResult:X8}", result.HResult);
         Assert.Equal(CallState.Error, service.State);
         Assert.Equal(1, device.DisposeCount);
     }

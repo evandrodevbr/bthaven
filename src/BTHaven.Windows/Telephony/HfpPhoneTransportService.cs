@@ -256,6 +256,7 @@ public sealed class HfpPhoneTransportService : IPhoneTransport, IAsyncDisposable
             {
                 Succeeded = false,
                 Status = "Exception",
+                HResult = $"0x{exception.HResult:X8}",
                 Message = "A ativação HFP falhou; consulte os logs para o HRESULT.",
                 IsRegistered = false,
                 IsConnected = false,
