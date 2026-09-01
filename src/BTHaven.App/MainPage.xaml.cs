@@ -506,12 +506,9 @@ public sealed partial class MainPage : Page
                 return;
             }
             var matchingTargets = audioTargets.Where(target => MatchesDevice(device, target)).ToArray();
-            foreach (var target in matchingTargets)
+            if (matchingTargets.Length == 1 && !string.IsNullOrWhiteSpace(matchingTargets[0].Id))
             {
-                if (!string.IsNullOrWhiteSpace(target.Id))
-                {
-                    a2dpLogicalDeviceIds[target.Id] = device.Id;
-                }
+                a2dpLogicalDeviceIds[matchingTargets[0].Id] = device.Id;
             }
             selectedA2dpDeviceId = matchingTargets.Length == 1 ? matchingTargets[0].Id : null;
             A2dpTargetText.Text = matchingTargets.Length switch
@@ -753,6 +750,7 @@ public sealed partial class MainPage : Page
         MediaAudioButton.IsEnabled = false;
         try
         {
+            await autoReconnectService.DisableAsync();
             var connected = await a2dpService.ConnectAsync(requestedA2dpDeviceId, lifetime.Token);
             if (connected && AutoReconnectCheckBox.IsChecked == true)
             {

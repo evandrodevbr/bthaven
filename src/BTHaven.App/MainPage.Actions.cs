@@ -99,6 +99,7 @@ public sealed partial class MainPage
                 {
                     selectedA2dpDeviceId = targetId;
                 }
+                await autoReconnectService.DisableAsync();
                 var connected = await a2dpService.ConnectAsync(targetId, lifetime.Token);
                 if (connected)
                 {
