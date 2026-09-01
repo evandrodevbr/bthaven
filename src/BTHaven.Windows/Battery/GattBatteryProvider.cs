@@ -9,6 +9,65 @@ using Windows.Storage.Streams;
 
 namespace BTHaven.Windows.Battery;
 
+internal sealed class GattSubscriptionCleanup : IDisposable
+{
+    private readonly Action detachHandler;
+    private readonly Action disposeCharacteristic;
+    private readonly Action disposeService;
+    private readonly Action disposeDeviceAction;
+    private int disposed;
+
+    public GattSubscriptionCleanup(
+        Action detachHandler,
+        Action disposeCharacteristic,
+        Action disposeService,
+        Action disposeDevice)
+    {
+        this.detachHandler = detachHandler ?? throw new ArgumentNullException(nameof(detachHandler));
+        this.disposeCharacteristic = disposeCharacteristic ?? throw new ArgumentNullException(nameof(disposeCharacteristic));
+        this.disposeService = disposeService ?? throw new ArgumentNullException(nameof(disposeService));
+        this.disposeDeviceAction = disposeDevice ?? throw new ArgumentNullException(nameof(disposeDevice));
+    }
+
+    public void Dispose() => DisposeCore(includeDevice: true);
+
+    internal void DisposeWithoutDevice() => DisposeCore(includeDevice: false);
+
+    private void DisposeCore(bool includeDevice)
+    {
+        if (Interlocked.Exchange(ref disposed, 1) != 0)
+        {
+            return;
+        }
+
+        try
+        {
+            detachHandler();
+        }
+        finally
+        {
+            try
+            {
+                disposeCharacteristic();
+            }
+            finally
+            {
+                try
+                {
+                    disposeService();
+                }
+                finally
+                {
+                    if (includeDevice)
+                    {
+                        disposeDeviceAction();
+                    }
+                }
+            }
+        }
+    }
+}
+
 public sealed class GattBatteryProvider : IBatteryProvider, IAsyncDisposable
 {
     private readonly object sync = new();
@@ -196,6 +255,11 @@ public sealed class GattBatteryProvider : IBatteryProvider, IAsyncDisposable
             });
             if (servicesResult.Status != GattCommunicationStatus.Success || servicesResult.Services.Count == 0)
             {
+                foreach (var service in servicesResult.Services)
+                {
+                    service.Dispose();
+                }
+
                 logger.Info("Battery.Gatt.SubscribeUnavailable", new Dictionary<string, object?>
                 {
                     ["deviceId"] = device.Id,
@@ -207,88 +271,110 @@ public sealed class GattBatteryProvider : IBatteryProvider, IAsyncDisposable
 
             foreach (var service in servicesResult.Services)
             {
-                var characteristicsResult = await service.GetCharacteristicsForUuidAsync(
-                    GattCharacteristicUuids.BatteryLevel,
-                    BluetoothCacheMode.Uncached);
-                logger.Debug("Battery.Gatt.Subscribe.CharacteristicQuery", new Dictionary<string, object?>
+                GattSubscriptionCleanup? pendingCleanup = null;
+                var retained = false;
+                try
                 {
-                    ["deviceId"] = device.Id,
-                    ["serviceUuid"] = service.Uuid,
-                    ["status"] = characteristicsResult.Status.ToString(),
-                    ["count"] = characteristicsResult.Characteristics.Count,
-                });
-                if (characteristicsResult.Status != GattCommunicationStatus.Success)
-                {
-                    continue;
-                }
-
-                var characteristic = characteristicsResult.Characteristics.FirstOrDefault(candidate =>
-                    candidate.CharacteristicProperties.HasFlag(GattCharacteristicProperties.Notify)
-                    || candidate.CharacteristicProperties.HasFlag(GattCharacteristicProperties.Indicate));
-                if (characteristic is null)
-                {
-                    logger.Info("Battery.Gatt.SubscribeUnavailable", new Dictionary<string, object?>
+                    var characteristicsResult = await service.GetCharacteristicsForUuidAsync(
+                        GattCharacteristicUuids.BatteryLevel,
+                        BluetoothCacheMode.Uncached);
+                    logger.Debug("Battery.Gatt.Subscribe.CharacteristicQuery", new Dictionary<string, object?>
                     {
                         ["deviceId"] = device.Id,
-                        ["reason"] = "Battery Level characteristic does not support notifications",
+                        ["serviceUuid"] = service.Uuid,
+                        ["status"] = characteristicsResult.Status.ToString(),
+                        ["count"] = characteristicsResult.Characteristics.Count,
                     });
-                    continue;
-                }
-
-                TypedEventHandler<GattCharacteristic, GattValueChangedEventArgs> handler = (_, args) =>
-                {
-                    if (!TryReadLevel(args.CharacteristicValue, out var level))
+                    if (characteristicsResult.Status != GattCommunicationStatus.Success)
                     {
-                        logger.Warning("Battery.Gatt.Notification.InvalidValue", new Dictionary<string, object?>
+                        continue;
+                    }
+
+                    var characteristic = characteristicsResult.Characteristics.FirstOrDefault(candidate =>
+                        candidate.CharacteristicProperties.HasFlag(GattCharacteristicProperties.Notify)
+                        || candidate.CharacteristicProperties.HasFlag(GattCharacteristicProperties.Indicate));
+                    if (characteristic is null)
+                    {
+                        logger.Info("Battery.Gatt.SubscribeUnavailable", new Dictionary<string, object?>
                         {
                             ["deviceId"] = device.Id,
-                            ["valueLength"] = args.CharacteristicValue?.Length,
+                            ["reason"] = "Battery Level characteristic does not support notifications",
                         });
-                        return;
+                        continue;
                     }
 
-                    var state = CreateState(level);
-                    logger.Info("Battery.Gatt.Notification.ValueChanged", new Dictionary<string, object?>
+                    TypedEventHandler<GattCharacteristic, GattValueChangedEventArgs> handler = (_, args) =>
+                    {
+                        if (!TryReadLevel(args.CharacteristicValue, out var level))
+                        {
+                            logger.Warning("Battery.Gatt.Notification.InvalidValue", new Dictionary<string, object?>
+                            {
+                                ["deviceId"] = device.Id,
+                                ["valueLength"] = args.CharacteristicValue?.Length,
+                            });
+                            return;
+                        }
+
+                        var state = CreateState(level);
+                        logger.Info("Battery.Gatt.Notification.ValueChanged", new Dictionary<string, object?>
+                        {
+                            ["deviceId"] = device.Id,
+                            ["percentage"] = state.Percentage,
+                        });
+                        onChanged?.Invoke(state);
+                        BatteryChanged?.Invoke(this, state);
+                    };
+                    pendingCleanup = new GattSubscriptionCleanup(
+                        () => characteristic.ValueChanged -= handler,
+                        static () => { }, // GattCharacteristic is released when the detached handler drops its reference.
+                        service.Dispose,
+                        bluetoothDevice.Dispose);
+                    characteristic.ValueChanged += handler;
+                    var configuration = characteristic.CharacteristicProperties.HasFlag(GattCharacteristicProperties.Notify)
+                        ? GattClientCharacteristicConfigurationDescriptorValue.Notify
+                        : GattClientCharacteristicConfigurationDescriptorValue.Indicate;
+                    var status = await characteristic.WriteClientCharacteristicConfigurationDescriptorAsync(configuration);
+                    logger.Debug("Battery.Gatt.Subscribe.ConfigurationResult", new Dictionary<string, object?>
                     {
                         ["deviceId"] = device.Id,
-                        ["percentage"] = state.Percentage,
+                        ["configuration"] = configuration.ToString(),
+                        ["status"] = status.ToString(),
                     });
-                    onChanged?.Invoke(state);
-                    BatteryChanged?.Invoke(this, state);
-                };
-                characteristic.ValueChanged += handler;
-                var configuration = characteristic.CharacteristicProperties.HasFlag(GattCharacteristicProperties.Notify)
-                    ? GattClientCharacteristicConfigurationDescriptorValue.Notify
-                    : GattClientCharacteristicConfigurationDescriptorValue.Indicate;
-                var status = await characteristic.WriteClientCharacteristicConfigurationDescriptorAsync(configuration);
-                logger.Debug("Battery.Gatt.Subscribe.ConfigurationResult", new Dictionary<string, object?>
-                {
-                    ["deviceId"] = device.Id,
-                    ["configuration"] = configuration.ToString(),
-                    ["status"] = status.ToString(),
-                });
-                if (status != GattCommunicationStatus.Success)
-                {
-                    characteristic.ValueChanged -= handler;
-                    continue;
-                }
-
-                var subscription = new Subscription(bluetoothDevice, service, characteristic, handler);
-                lock (sync)
-                {
-                    if (subscriptions.Remove(device.Id, out var previous))
+                    if (status != GattCommunicationStatus.Success)
                     {
-                        previous.Dispose();
+                        continue;
                     }
-                    subscriptions[device.Id] = subscription;
+
+                    var subscription = new Subscription(pendingCleanup);
+                    lock (sync)
+                    {
+                        if (subscriptions.Remove(device.Id, out var previous))
+                        {
+                            previous.Dispose();
+                        }
+                        subscriptions[device.Id] = subscription;
+                    }
+                    pendingCleanup = null;
+                    retained = true;
+                    createdSubscription = subscription;
+                    logger.Info("Battery.Gatt.SubscribeCompleted", new Dictionary<string, object?>
+                    {
+                        ["deviceId"] = device.Id,
+                        ["configuration"] = configuration.ToString(),
+                    });
+                    return true;
                 }
-                createdSubscription = subscription;
-                logger.Info("Battery.Gatt.SubscribeCompleted", new Dictionary<string, object?>
+                finally
                 {
-                    ["deviceId"] = device.Id,
-                    ["configuration"] = configuration.ToString(),
-                });
-                return true;
+                    if (pendingCleanup is not null)
+                    {
+                        pendingCleanup.DisposeWithoutDevice();
+                    }
+                    else if (!retained)
+                    {
+                        service.Dispose();
+                    }
+                }
             }
 
             logger.Info("Battery.Gatt.SubscribeUnavailable", new Dictionary<string, object?>
@@ -339,6 +425,29 @@ public sealed class GattBatteryProvider : IBatteryProvider, IAsyncDisposable
         };
     }
 
+    internal static bool TryParseBatteryLevel(ReadOnlySpan<byte> value, out byte level)
+    {
+        if (value.IsEmpty)
+        {
+            level = 0;
+            return false;
+        }
+
+        return TryParseBatteryLevel(value[0], out level);
+    }
+
+    private static bool TryParseBatteryLevel(byte value, out byte level)
+    {
+        if (value > 100)
+        {
+            level = 0;
+            return false;
+        }
+
+        level = value;
+        return true;
+    }
+
     private static bool TryReadLevel(IBuffer? buffer, out byte level)
     {
         if (buffer is null || buffer.Length < 1)
@@ -348,34 +457,18 @@ public sealed class GattBatteryProvider : IBatteryProvider, IAsyncDisposable
         }
 
         var reader = DataReader.FromBuffer(buffer);
-        level = reader.ReadByte();
-        return true;
+        return TryParseBatteryLevel(reader.ReadByte(), out level);
     }
 
     private sealed class Subscription : IDisposable
     {
-        private readonly BluetoothLEDevice device;
-        private readonly GattDeviceService service;
-        private readonly GattCharacteristic characteristic;
-        private readonly TypedEventHandler<GattCharacteristic, GattValueChangedEventArgs> handler;
+        private readonly GattSubscriptionCleanup cleanup;
 
-        public Subscription(
-            BluetoothLEDevice device,
-            GattDeviceService service,
-            GattCharacteristic characteristic,
-            TypedEventHandler<GattCharacteristic, GattValueChangedEventArgs> handler)
+        public Subscription(GattSubscriptionCleanup cleanup)
         {
-            this.device = device;
-            this.service = service;
-            this.characteristic = characteristic;
-            this.handler = handler;
+            this.cleanup = cleanup ?? throw new ArgumentNullException(nameof(cleanup));
         }
 
-        public void Dispose()
-        {
-            characteristic.ValueChanged -= handler;
-            service.Dispose();
-            device.Dispose();
-        }
+        public void Dispose() => cleanup.Dispose();
     }
 }
