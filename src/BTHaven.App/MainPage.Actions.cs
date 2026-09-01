@@ -95,7 +95,7 @@ public sealed partial class MainPage
                 }
 
                 var targetId = matches[0].Id;
-                a2dpLogicalDeviceIds[targetId] = device.Id;
+                BindA2dpTarget(targetId, device.Id);
                 if (string.Equals(selectedDeviceId, device.Id, StringComparison.OrdinalIgnoreCase))
                 {
                     selectedA2dpDeviceId = targetId;
@@ -121,6 +121,8 @@ public sealed partial class MainPage
             }
             else if (string.Equals(activeMediaDeviceId, device.Id, StringComparison.OrdinalIgnoreCase))
             {
+                ClearA2dpBindingsForLogicalDevice(device.Id);
+                InvalidateCurrentA2dpTarget();
                 await autoReconnectService.DisableAsync();
                 await a2dpService.DisconnectAsync(lifetime.Token);
                 activeMediaDeviceId = null;

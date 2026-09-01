@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.Collections.ObjectModel;
 using BTHaven.Core.Audio;
 using BTHaven.Core.Calls;
@@ -41,6 +42,7 @@ public sealed partial class MainPage : Page
     private bool ready;
     private bool disposed;
     private readonly Dictionary<string, string> a2dpLogicalDeviceIds = new(StringComparer.OrdinalIgnoreCase);
+    private readonly ConcurrentDictionary<string, byte> invalidatedA2dpDeviceIds = new(StringComparer.OrdinalIgnoreCase);
 
     public ObservableCollection<DeviceRowViewModel> Rows { get; } = [];
 
@@ -339,12 +341,17 @@ public sealed partial class MainPage : Page
 
         var eventDeviceId = a2dpService.DeviceId;
         var observedServiceState = a2dpService.State;
-        var mappedLogicalDeviceId = eventDeviceId is not null
+        var bindingInvalidated = eventDeviceId is not null
+            && invalidatedA2dpDeviceIds.ContainsKey(eventDeviceId);
+        var mappedLogicalDeviceId = !bindingInvalidated
+            && eventDeviceId is not null
             && a2dpLogicalDeviceIds.TryGetValue(eventDeviceId, out var mappedDeviceId)
             && devices.ContainsKey(mappedDeviceId)
             ? mappedDeviceId
             : null;
-        var matchingLogicalIds = state == MediaAudioSinkState.Opened && eventDeviceId is not null
+        var matchingLogicalIds = !bindingInvalidated
+            && state == MediaAudioSinkState.Opened
+            && eventDeviceId is not null
             ? devices.Values
                 .Where(device => device.Endpoints.Any(endpoint =>
                     string.Equals(endpoint.Id, eventDeviceId, StringComparison.OrdinalIgnoreCase)))
@@ -354,7 +361,6 @@ public sealed partial class MainPage : Page
             : [];
         var logicalDeviceId = mappedLogicalDeviceId
             ?? (matchingLogicalIds.Length == 1 ? matchingLogicalIds[0] : null);
-
         logger.Debug("App.A2DP.StateChanged", new Dictionary<string, object?>
         {
             ["state"] = state.ToString(),
@@ -415,6 +421,46 @@ public sealed partial class MainPage : Page
                 ["reason"] = "DispatcherQueue was unavailable",
             });
         }
+    }
+
+    private void BindA2dpTarget(string targetId, string logicalDeviceId)
+    {
+        a2dpLogicalDeviceIds[targetId] = logicalDeviceId;
+        invalidatedA2dpDeviceIds.TryRemove(targetId, out _);
+    }
+
+    private void ClearA2dpBindingsForLogicalDevice(string logicalDeviceId)
+    {
+        foreach (var targetId in a2dpLogicalDeviceIds
+                     .Where(binding => string.Equals(binding.Value, logicalDeviceId, StringComparison.OrdinalIgnoreCase))
+                     .Select(binding => binding.Key)
+                     .ToArray())
+        {
+            InvalidateA2dpTarget(targetId);
+        }
+    }
+
+    private void ClearA2dpBindings()
+    {
+        foreach (var targetId in a2dpLogicalDeviceIds.Keys.ToArray())
+        {
+            InvalidateA2dpTarget(targetId);
+        }
+        InvalidateCurrentA2dpTarget();
+    }
+
+    private void InvalidateCurrentA2dpTarget()
+    {
+        if (a2dpService.DeviceId is { } targetId)
+        {
+            InvalidateA2dpTarget(targetId);
+        }
+    }
+
+    private void InvalidateA2dpTarget(string targetId)
+    {
+        a2dpLogicalDeviceIds.Remove(targetId);
+        invalidatedA2dpDeviceIds.TryAdd(targetId, 0);
     }
 
     private void RefreshRows()
@@ -523,7 +569,9 @@ public sealed partial class MainPage : Page
                 return;
             }
             var matchingTargets = BluetoothDeviceCorrelation.FindMatches(device, audioTargets);
-            if (matchingTargets.Length == 1 && !string.IsNullOrWhiteSpace(matchingTargets[0].Id))
+            if (matchingTargets.Length == 1
+                && !string.IsNullOrWhiteSpace(matchingTargets[0].Id)
+                && !invalidatedA2dpDeviceIds.ContainsKey(matchingTargets[0].Id))
             {
                 a2dpLogicalDeviceIds[matchingTargets[0].Id] = device.Id;
             }
@@ -762,7 +810,7 @@ public sealed partial class MainPage : Page
         var requestedDeviceId = selectedDeviceId;
         if (requestedDeviceId is not null)
         {
-            a2dpLogicalDeviceIds[requestedA2dpDeviceId] = requestedDeviceId;
+            BindA2dpTarget(requestedA2dpDeviceId, requestedDeviceId);
         }
         MediaAudioButton.IsEnabled = false;
         try
@@ -830,10 +878,18 @@ public sealed partial class MainPage : Page
         });
         if (enabled && selectedA2dpDeviceId is not null)
         {
+            if (selectedDeviceId is not null)
+            {
+                BindA2dpTarget(selectedA2dpDeviceId, selectedDeviceId);
+            }
             await autoReconnectService.EnableAsync(selectedA2dpDeviceId, lifetime.Token);
         }
         else
         {
+            if (!enabled)
+            {
+                ClearA2dpBindings();
+            }
             await autoReconnectService.DisableAsync();
         }
     }
