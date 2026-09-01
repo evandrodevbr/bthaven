@@ -358,7 +358,18 @@ public sealed partial class MainPage : Page
             }
             else if (state is MediaAudioSinkState.Disabled or MediaAudioSinkState.Failed)
             {
-                activeMediaDeviceId = null;
+                if (autoReconnectService.IsEnabled && activeMediaDeviceId is not null)
+                {
+                    logger.Info("App.A2DP.StateChanged.WaitingForReconnect", new Dictionary<string, object?>
+                    {
+                        ["state"] = state.ToString(),
+                        ["logicalDeviceId"] = activeMediaDeviceId,
+                    });
+                }
+                else
+                {
+                    activeMediaDeviceId = null;
+                }
             }
 
             RefreshRows();
