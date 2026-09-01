@@ -21,6 +21,41 @@ public sealed record BluetoothDeviceObservation
     public DateTimeOffset ObservedAt { get; init; } = DateTimeOffset.UtcNow;
 }
 
+public static class BluetoothDeviceIdentity
+{
+    public static string GetLogicalId(BluetoothDeviceObservation observation)
+    {
+        ArgumentNullException.ThrowIfNull(observation);
+
+        var containerId = NormalizeIdentifier(observation.ContainerId);
+        if (containerId.Length > 0)
+        {
+            return $"container:{containerId}";
+        }
+
+        var address = NormalizeAddress(observation.Address);
+        if (address.Length > 0)
+        {
+            return $"address:{address}";
+        }
+
+        return $"endpoint:{observation.Transport}:{observation.Id}";
+    }
+
+    public static string NormalizeAddress(string? address)
+    {
+        if (string.IsNullOrWhiteSpace(address))
+        {
+            return string.Empty;
+        }
+
+        return string.Concat(address.Where(char.IsAsciiLetterOrDigit)).ToUpperInvariant();
+    }
+
+    private static string NormalizeIdentifier(string? identifier) =>
+        identifier?.Trim().ToUpperInvariant() ?? string.Empty;
+}
+
 public static class BluetoothDeviceProjection
 {
     public static BluetoothDeviceModel ToModel(BluetoothDeviceObservation observation)
@@ -29,7 +64,7 @@ public static class BluetoothDeviceProjection
 
         return new BluetoothDeviceModel
         {
-            Id = observation.Id,
+            Id = BluetoothDeviceIdentity.GetLogicalId(observation),
             ContainerId = observation.ContainerId,
             Name = observation.Name,
             Manufacturer = observation.Manufacturer,
@@ -44,6 +79,16 @@ public static class BluetoothDeviceProjection
             IsPresent = observation.IsPresent ?? false,
             Rssi = observation.Rssi,
             Capabilities = observation.Capabilities,
+            Endpoints =
+            [
+                new BluetoothEndpointReference
+                {
+                    Id = observation.Id,
+                    Transport = observation.Transport,
+                    ContainerId = observation.ContainerId,
+                    Address = observation.Address,
+                },
+            ],
             Services = observation.Services,
             Profiles = observation.Profiles,
             LastUpdated = observation.ObservedAt,

@@ -28,8 +28,16 @@ public sealed class BluetoothDeviceProjectionTests
 
         var model = BluetoothDeviceProjection.ToModel(observation);
 
-        Assert.Equal("endpoint-id", model.Id);
+        Assert.Equal("container:CONTAINER-ID", model.Id);
         Assert.Equal("container-id", model.ContainerId);
+        Assert.Collection(
+            model.Endpoints,
+            endpoint =>
+            {
+                Assert.Equal("endpoint-id", endpoint.Id);
+                Assert.Equal(BluetoothTransport.DualMode, endpoint.Transport);
+                Assert.Equal("container-id", endpoint.ContainerId);
+            });
         Assert.True(model.IsPaired);
         Assert.False(model.IsConnected);
         Assert.True(model.IsPresent);

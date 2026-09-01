@@ -33,6 +33,14 @@ public enum BluetoothDeviceCategory
     Other,
 }
 
+public sealed record BluetoothEndpointReference
+{
+    public required string Id { get; init; }
+    public required BluetoothTransport Transport { get; init; }
+    public string? ContainerId { get; init; }
+    public string? Address { get; init; }
+}
+
 public sealed record BluetoothDeviceModel
 {
     public required string Id { get; init; }
@@ -49,6 +57,7 @@ public sealed record BluetoothDeviceModel
     public int? Rssi { get; init; }
     public Battery.BatteryState? Battery { get; init; }
     public BluetoothCapabilities Capabilities { get; init; }
+    public IReadOnlyList<BluetoothEndpointReference> Endpoints { get; init; } = [];
     public IReadOnlyList<string> Services { get; init; } = [];
     public IReadOnlyList<string> Profiles { get; init; } = [];
     public DateTimeOffset LastUpdated { get; init; } = DateTimeOffset.UtcNow;
