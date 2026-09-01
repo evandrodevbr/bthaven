@@ -12,7 +12,7 @@ This file is the sanitized evidence ledger for the current Windows machine. It i
 | .NET runtime | `10.0.11`, `win-x64` |
 | MSBuild | `18.9.6+14fbf8d52` |
 | Bluetooth adapter | available; Classic and Low Energy both supported |
-| Current refresh | `2026-09-01T12:11:54Z`-`12:14:11Z` |
+| Current refresh | `2026-09-01T13:10:21Z`-`13:11:37Z` |
 
 ## Status summary
 
@@ -117,13 +117,18 @@ The implementation and probes intentionally do not change phone volume. The publ
 
 ```text
 powershell.exe -NoProfile -Command '& "$env:USERPROFILE/.dotnet/dotnet.exe" build BTHaven.slnx -c Release -p:Platform=x64 --no-restore'
-Succeeded; 0 errors; 2 warnings.
+Succeeded; 0 warnings, 0 errors.
 
 powershell.exe -NoProfile -Command '& "$env:USERPROFILE/.dotnet/dotnet.exe" build src/BTHaven.App/BTHaven.App.csproj -c Release -p:Platform=x64 --no-restore'
-Succeeded; 0 errors; 2 warnings.
+Succeeded; 0 warnings, 0 errors.
+
+powershell.exe -NoProfile -Command '& "$env:USERPROFILE/.dotnet/dotnet.exe" build src/BTHaven.Windows/BTHaven.Windows.csproj -c Release -p:Platform=x64 --no-restore'
+Succeeded; 0 warnings, 0 errors.
 ```
 
-Both builds reported the same CS8604 warning at `src/BTHaven.App/MainPage.xaml.cs:756` for a possible null `requestedDeviceId` passed to `A2dpSinkService.ConnectAsync`. The App build confirms the untracked `MainPage.Actions.cs` compiles in x64 Release.
+The solution, App, and Windows Release x64 builds all completed with zero warnings and zero errors. The correlation import from `8b3b0a9` and the tracked source graph from `086b1b1` are included in the verified App build.
+
+A fresh detached worktree at HEAD `6046541` restored the solution and built all 12 projects with zero warnings and zero errors, confirming the required inspection and remote-volume source graph is present in the checkout.
 
 ### Tests
 
@@ -132,14 +137,16 @@ The required serial no-build runs and the standard runs were both executed with 
 | Mode | Project | Result |
 |---|---|---|
 | `--no-build` | `BTHaven.Core.Tests` | `22` total, `22` passed, `0` failed; exit `0` |
-| `--no-build` | `BTHaven.IntegrationTests` | `51` total, `49` passed, `2` failed; exit `1` |
+| `--no-build` | `BTHaven.IntegrationTests` | `59` total, `57` passed, `2` failed; exit `1` |
 | standard | `BTHaven.Core.Tests` | `22` total, `22` passed, `0` failed; exit `0` |
-| standard | `BTHaven.IntegrationTests` | `51` total, `49` passed, `2` failed; exit `1` |
+| standard | `BTHaven.IntegrationTests` | `59` total, `57` passed, `2` failed; exit `1` |
 
 The two Integration failures are explicit environment limits, not skipped tests:
 
 1. `BluetoothDeviceInspectorTests.Inspection_includes_classic_and_ble_endpoints_for_the_connected_phone` failed with `Connected dual-mode Bluetooth hardware phone required.` The current run had no connected dual-mode phone.
 2. `WindowsAudioServicesSmokeTests.A2dp_service_opens_the_first_windows_remote_audio_target` failed because `A2dpSinkService.ConnectAsync` returned `false` (`Assert.True` expected `true`). Discovery found a target, but this Windows device/runtime did not open it.
+
+The focused regression filter covering manager identity/correlation, GATT cleanup, A2DP lifecycle/reconnect, HFP discovery/activation, diagnostics redaction/export, and the remote-volume boundary passed `51` of `51` tests; exit `0` with `-m:1 --no-build`.
 
 ## Dependency and secrets scans
 
@@ -167,10 +174,12 @@ The second secrets scan covered source, test, and probe trees while excluding ge
 powershell.exe -NoProfile -Command '& "$env:USERPROFILE/.dotnet/dotnet.exe" --info'
 powershell.exe -NoProfile -Command '& "$env:USERPROFILE/.dotnet/dotnet.exe" build BTHaven.slnx -c Release -p:Platform=x64 --no-restore'
 powershell.exe -NoProfile -Command '& "$env:USERPROFILE/.dotnet/dotnet.exe" build src/BTHaven.App/BTHaven.App.csproj -c Release -p:Platform=x64 --no-restore'
+powershell.exe -NoProfile -Command '& "$env:USERPROFILE/.dotnet/dotnet.exe" build src/BTHaven.Windows/BTHaven.Windows.csproj -c Release -p:Platform=x64 --no-restore'
 powershell.exe -NoProfile -Command '& "$env:USERPROFILE/.dotnet/dotnet.exe" test tests/BTHaven.Core.Tests/BTHaven.Core.Tests.csproj -c Release -m:1 --no-build --logger "console;verbosity=normal"'
 powershell.exe -NoProfile -Command '& "$env:USERPROFILE/.dotnet/dotnet.exe" test tests/BTHaven.IntegrationTests/BTHaven.IntegrationTests.csproj -c Release -m:1 --no-build --logger "console;verbosity=normal"'
 powershell.exe -NoProfile -Command '& "$env:USERPROFILE/.dotnet/dotnet.exe" test tests/BTHaven.Core.Tests/BTHaven.Core.Tests.csproj -c Release -m:1 --logger "console;verbosity=normal"'
 powershell.exe -NoProfile -Command '& "$env:USERPROFILE/.dotnet/dotnet.exe" test tests/BTHaven.IntegrationTests/BTHaven.IntegrationTests.csproj -c Release -m:1 --logger "console;verbosity=normal"'
+powershell.exe -NoProfile -Command '& "$env:USERPROFILE/.dotnet/dotnet.exe" test tests/BTHaven.IntegrationTests/BTHaven.IntegrationTests.csproj -c Release -m:1 --no-build --filter "FullyQualifiedName~BluetoothDeviceManagerTests|FullyQualifiedName~BluetoothDeviceInspectorMatchingTests|FullyQualifiedName~GattBatteryProviderTests|FullyQualifiedName~DiagnosticsExporterTests|FullyQualifiedName~TraceDiagnosticLoggerTests|FullyQualifiedName~HfpPhoneTransportServiceTests|FullyQualifiedName~HfpPhoneTransportServiceActivationTests|FullyQualifiedName~A2dpAutoReconnectServiceTests|FullyQualifiedName~A2dpSinkServiceTests|FullyQualifiedName~RemoteVolumeServiceTests" --logger "console;verbosity=normal"
 ```
 
 ### Read-only probes
@@ -184,11 +193,12 @@ powershell.exe -NoProfile -Command '& "./probes/05-call-audio-routing/bin/Releas
 powershell.exe -NoProfile -Command '& "./probes/06-device-inspection/bin/Release/net10.0-windows10.0.26100.0/BTHaven.Probe.DeviceInspection.exe"'
 ```
 
-All six probe processes exited `0`. Probe 03 omitted `--device-id`; probe 04 omitted `--request-access`, `--register`, and `--connect`.
+All six probe processes were rerun read-only and exited `0` between `13:10:21Z` and `13:11:37Z`. Probe 03 omitted `--device-id`; probe 04 omitted `--request-access`, `--register`, and `--connect`.
 
 ## Explicit boundaries
 
-- HFP access, registration, and connection activation were not run.
+- HFP access, registration, and connection activation were not run; no HFP activation flag was passed.
 - A2DP open/hold and audible playback were not run.
 - No MSIX publish, packaging, install, or deployment command was run.
 - The two hardware-dependent Integration failures above remain visible; they were not converted into skips or masked.
+- No production source or test files were modified during this final verification.
