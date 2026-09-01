@@ -27,6 +27,8 @@ public sealed class BluetoothDeviceManager : IBluetoothDeviceService, IAsyncDisp
     ];
 
     private readonly object sync = new();
+    private readonly Dictionary<string, string> endpointLogicalKeys = new(StringComparer.OrdinalIgnoreCase);
+    private readonly Dictionary<string, string> reliableIdentityLogicalKeys = new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<string, BluetoothDeviceObservation> endpointObservations = new(StringComparer.OrdinalIgnoreCase);
     private readonly Channel<BluetoothDeviceChange> changes = Channel.CreateUnbounded<BluetoothDeviceChange>(new UnboundedChannelOptions
     {
@@ -239,7 +241,17 @@ public sealed class BluetoothDeviceManager : IBluetoothDeviceService, IAsyncDisp
             BluetoothDeviceObservation? previous;
             lock (sync)
             {
-                endpointObservations.TryGetValue(update.Id, out previous);
+                var endpointKey = EndpointKey(update.Id, transport);
+                if (!endpointObservations.TryGetValue(endpointKey, out previous))
+                {
+                    logger.Info("Bluetooth.Device.UpdateIgnored", new Dictionary<string, object?>
+                    {
+                        ["deviceId"] = update.Id,
+                        ["transport"] = transport.ToString(),
+                        ["reason"] = "Update arrived before Added or after Removed",
+                    });
+                    return;
+                }
             }
 
             if (previous is null)
@@ -271,15 +283,18 @@ public sealed class BluetoothDeviceManager : IBluetoothDeviceService, IAsyncDisp
         BluetoothDeviceModel? after;
         lock (sync)
         {
-            if (!endpointObservations.TryGetValue(endpointId, out var previous))
+            var endpointKey = EndpointKey(endpointId, transport);
+            if (!endpointObservations.TryGetValue(endpointKey, out var previous))
             {
                 return;
             }
 
             var logicalKey = LogicalKey(previous);
             before = BuildModelLocked(logicalKey);
-            endpointObservations.Remove(endpointId);
+            endpointObservations.Remove(endpointKey);
+            endpointLogicalKeys.Remove(endpointKey);
             after = BuildModelLocked(logicalKey);
+            RemoveReliableBindingsIfUnused(logicalKey);
         }
 
         PublishChange(before, after, endpointId);
@@ -302,21 +317,42 @@ public sealed class BluetoothDeviceManager : IBluetoothDeviceService, IAsyncDisp
 
         lock (sync)
         {
-            endpointObservations.TryGetValue(observation.Id, out var previous);
+            var endpointKey = EndpointKey(observation.Id, observation.Transport);
+            var hadEndpointBinding = endpointLogicalKeys.ContainsKey(endpointKey);
+            endpointObservations.TryGetValue(endpointKey, out var previous);
             effectiveObservation = previous is null
                 ? observation
                 : RetainPreviousIdentityIfIncomplete(previous, observation);
             oldLogicalKey = previous is null ? null : LogicalKey(previous);
-            newLogicalKey = LogicalKey(effectiveObservation);
-            var beforeLogicalKey = oldLogicalKey ?? newLogicalKey;
-            before = BuildModelLocked(beforeLogicalKey);
+            var identityConflict = previous is not null
+                && HasReliableIdentity(previous)
+                && HasReliableIdentity(observation)
+                && !ReliableIdentityMatches(previous, observation);
 
-            if (previous is not null && !string.Equals(oldLogicalKey, newLogicalKey, StringComparison.OrdinalIgnoreCase))
+            if (identityConflict)
             {
-                endpointObservations.Remove(observation.Id);
+                before = BuildModelLocked(oldLogicalKey!);
+                endpointObservations.Remove(endpointKey);
+                endpointLogicalKeys.Remove(endpointKey);
+                RemoveReliableBindingsIfUnused(oldLogicalKey!);
+                newLogicalKey = ResolveLogicalKey(effectiveObservation);
+            }
+            else
+            {
+                newLogicalKey = oldLogicalKey ?? ResolveLogicalKey(effectiveObservation);
+                before = BuildModelLocked(newLogicalKey);
             }
 
-            endpointObservations[effectiveObservation.Id] = effectiveObservation;
+            endpointObservations[endpointKey] = effectiveObservation;
+            if (hadEndpointBinding || (previous is null && !HasReliableIdentity(effectiveObservation)))
+            {
+                endpointLogicalKeys[endpointKey] = newLogicalKey;
+            }
+
+            BindReliableIdentities(
+                effectiveObservation,
+                newLogicalKey,
+                previous is not null && !HasReliableIdentity(previous) && HasReliableIdentity(effectiveObservation));
             after = BuildModelLocked(newLogicalKey);
             if (oldLogicalKey is not null && !string.Equals(oldLogicalKey, newLogicalKey, StringComparison.OrdinalIgnoreCase))
             {
@@ -388,6 +424,117 @@ public sealed class BluetoothDeviceManager : IBluetoothDeviceService, IAsyncDisp
             : current;
     }
 
+    private string ResolveLogicalKey(BluetoothDeviceObservation observation)
+    {
+        if (TryGetReliableLogicalKey(observation, out var logicalKey))
+        {
+            return logicalKey;
+        }
+
+        return BluetoothDeviceIdentity.GetLogicalId(observation);
+    }
+
+    private string LogicalKey(BluetoothDeviceObservation observation)
+    {
+        var endpointKey = EndpointKey(observation.Id, observation.Transport);
+        return endpointLogicalKeys.TryGetValue(endpointKey, out var logicalKey)
+            ? logicalKey
+            : ResolveLogicalKey(observation);
+    }
+
+    private bool TryGetReliableLogicalKey(BluetoothDeviceObservation observation, out string logicalKey)
+    {
+        var containerId = NormalizeContainerId(observation.ContainerId);
+        if (containerId.Length > 0
+            && reliableIdentityLogicalKeys.TryGetValue($"container:{containerId}", out logicalKey!))
+        {
+            return true;
+        }
+
+        var address = BluetoothDeviceIdentity.NormalizeAddress(observation.Address);
+        if (address.Length > 0
+            && reliableIdentityLogicalKeys.TryGetValue($"address:{address}", out logicalKey!))
+        {
+            return true;
+        }
+
+        logicalKey = string.Empty;
+        return false;
+    }
+
+    private void BindReliableIdentities(
+        BluetoothDeviceObservation observation,
+        string logicalKey,
+        bool overwrite)
+    {
+        var containerId = NormalizeContainerId(observation.ContainerId);
+        if (containerId.Length > 0)
+        {
+            BindReliableIdentity($"container:{containerId}", logicalKey, overwrite);
+        }
+
+        var address = BluetoothDeviceIdentity.NormalizeAddress(observation.Address);
+        if (address.Length > 0)
+        {
+            BindReliableIdentity($"address:{address}", logicalKey, overwrite);
+        }
+    }
+
+    private void BindReliableIdentity(string identityKey, string logicalKey, bool overwrite)
+    {
+        if (overwrite || !reliableIdentityLogicalKeys.ContainsKey(identityKey))
+        {
+            reliableIdentityLogicalKeys[identityKey] = logicalKey;
+        }
+    }
+
+    private void RemoveReliableBindingsIfUnused(string logicalKey)
+    {
+        if (endpointObservations.Values.Any(observation =>
+                string.Equals(LogicalKey(observation), logicalKey, StringComparison.OrdinalIgnoreCase)))
+        {
+            return;
+        }
+
+        foreach (var identityKey in reliableIdentityLogicalKeys
+                     .Where(pair => string.Equals(pair.Value, logicalKey, StringComparison.OrdinalIgnoreCase))
+                     .Select(pair => pair.Key)
+                     .ToArray())
+        {
+            reliableIdentityLogicalKeys.Remove(identityKey);
+        }
+    }
+
+    private static bool HasReliableIdentity(BluetoothDeviceObservation observation) =>
+        !string.IsNullOrWhiteSpace(observation.ContainerId)
+        || !string.IsNullOrWhiteSpace(observation.Address);
+
+    private static bool ReliableIdentityMatches(
+        BluetoothDeviceObservation previous,
+        BluetoothDeviceObservation current)
+    {
+        var previousContainerId = NormalizeContainerId(previous.ContainerId);
+        var currentContainerId = NormalizeContainerId(current.ContainerId);
+        if (previousContainerId.Length > 0
+            && currentContainerId.Length > 0
+            && string.Equals(previousContainerId, currentContainerId, StringComparison.Ordinal))
+        {
+            return true;
+        }
+
+        var previousAddress = BluetoothDeviceIdentity.NormalizeAddress(previous.Address);
+        var currentAddress = BluetoothDeviceIdentity.NormalizeAddress(current.Address);
+        return previousAddress.Length > 0
+            && currentAddress.Length > 0
+            && string.Equals(previousAddress, currentAddress, StringComparison.Ordinal);
+    }
+
+    private static string NormalizeContainerId(string? containerId) =>
+        containerId?.Trim().ToUpperInvariant() ?? string.Empty;
+
+    private static string EndpointKey(string endpointId, BluetoothTransport transport) =>
+        $"{transport}:{endpointId}";
+
     private void PublishChange(
         BluetoothDeviceModel? before,
         BluetoothDeviceModel? after,
@@ -427,8 +574,8 @@ public sealed class BluetoothDeviceManager : IBluetoothDeviceService, IAsyncDisp
     private Dictionary<string, BluetoothDeviceModel> BuildModelsLocked()
     {
         return endpointObservations.Values
-            .GroupBy(LogicalKey, StringComparer.OrdinalIgnoreCase)
-            .ToDictionary(group => group.Key, Merge, StringComparer.OrdinalIgnoreCase);
+            .GroupBy(observation => LogicalKey(observation), StringComparer.OrdinalIgnoreCase)
+            .ToDictionary(group => group.Key, group => Merge(group.Key, group), StringComparer.OrdinalIgnoreCase);
     }
 
     private BluetoothDeviceModel? BuildModelLocked(string logicalKey)
@@ -436,16 +583,17 @@ public sealed class BluetoothDeviceManager : IBluetoothDeviceService, IAsyncDisp
         var group = endpointObservations.Values
             .Where(observation => string.Equals(LogicalKey(observation), logicalKey, StringComparison.OrdinalIgnoreCase))
             .ToArray();
-        return group.Length == 0 ? null : Merge(group);
+        return group.Length == 0 ? null : Merge(logicalKey, group);
     }
 
-    private static BluetoothDeviceModel Merge(IEnumerable<BluetoothDeviceObservation> observations)
+    private static BluetoothDeviceModel Merge(
+        string logicalKey,
+        IEnumerable<BluetoothDeviceObservation> observations)
     {
         var items = observations
             .OrderBy(item => item.Transport)
             .ThenBy(item => item.Id, StringComparer.OrdinalIgnoreCase)
             .ToArray();
-        var first = items[0];
         var hasClassic = items.Any(item => item.Transport is BluetoothTransport.Classic or BluetoothTransport.DualMode);
         var hasBle = items.Any(item => item.Transport is BluetoothTransport.LowEnergy or BluetoothTransport.DualMode);
         var transport = hasClassic && hasBle
@@ -467,7 +615,7 @@ public sealed class BluetoothDeviceManager : IBluetoothDeviceService, IAsyncDisp
 
         return new BluetoothDeviceModel
         {
-            Id = BluetoothDeviceIdentity.GetLogicalId(first),
+            Id = logicalKey,
             ContainerId = items.Select(item => item.ContainerId).FirstOrDefault(value => !string.IsNullOrWhiteSpace(value)),
             Name = items.Select(item => item.Name).FirstOrDefault(value => !string.IsNullOrWhiteSpace(value)) ?? "Bluetooth device",
             Manufacturer = items.Select(item => item.Manufacturer).FirstOrDefault(value => !string.IsNullOrWhiteSpace(value)),
@@ -494,9 +642,6 @@ public sealed class BluetoothDeviceManager : IBluetoothDeviceService, IAsyncDisp
             LastUpdated = items.Max(item => item.ObservedAt),
         };
     }
-
-    private static string LogicalKey(BluetoothDeviceObservation observation) =>
-        BluetoothDeviceIdentity.GetLogicalId(observation);
 
     private static TaskCompletionSource<bool> NewCompletionSource()
     {

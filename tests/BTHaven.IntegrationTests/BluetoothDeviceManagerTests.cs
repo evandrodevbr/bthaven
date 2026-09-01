@@ -130,6 +130,70 @@ public sealed class BluetoothDeviceManagerTests
     }
 
     [Fact]
+    public async Task Incomplete_first_observation_promotes_metadata_without_changing_logical_identity()
+    {
+        await using var manager = new BluetoothDeviceManager();
+        var incomplete = Observation("endpoint", BluetoothTransport.Classic, null, null) with
+        {
+            Name = "Provisional device",
+        };
+        manager.ApplyObservationForTesting(incomplete);
+
+        var added = ReadChange(manager);
+        Assert.Equal(BluetoothDeviceChangeKind.Added, added.Kind);
+        Assert.Equal("endpoint:Classic:endpoint", added.DeviceId);
+
+        var complete = incomplete with
+        {
+            ContainerId = "container-promoted",
+            Address = "00:11:22:33:44:55",
+            Name = "Promoted device",
+            Manufacturer = "Acme",
+            Model = "Phone",
+        };
+        manager.ApplyObservationForTesting(complete);
+
+        var updated = ReadChange(manager);
+        Assert.Equal(BluetoothDeviceChangeKind.Updated, updated.Kind);
+        Assert.Equal(added.DeviceId, updated.DeviceId);
+        Assert.NotNull(updated.Device);
+        Assert.Equal(complete.ContainerId, updated.Device!.ContainerId);
+        Assert.Equal(complete.Address, updated.Device.Address);
+        Assert.Equal(complete.Name, updated.Device.Name);
+        Assert.Equal(complete.Manufacturer, updated.Device.Manufacturer);
+        Assert.Equal(complete.Model, updated.Device.Model);
+
+        var model = Assert.Single(manager.GetModelsForTesting());
+        Assert.Equal(added.DeviceId, model.Id);
+        var endpoint = Assert.Single(model.Endpoints);
+        Assert.Equal(complete.Id, endpoint.Id);
+        Assert.Equal(complete.Transport, endpoint.Transport);
+        Assert.Equal(complete.ContainerId, endpoint.ContainerId);
+        Assert.Equal(complete.Address, endpoint.Address);
+    }
+
+    [Fact]
+    public async Task Same_endpoint_id_on_different_transports_remains_separate_without_identity()
+    {
+        await using var manager = new BluetoothDeviceManager();
+        var classic = Observation("shared-endpoint", BluetoothTransport.Classic, null, null);
+        var ble = Observation("shared-endpoint", BluetoothTransport.LowEnergy, null, null);
+
+        manager.ApplyObservationForTesting(classic);
+        manager.ApplyObservationForTesting(ble);
+
+        var models = manager.GetModelsForTesting();
+        Assert.Equal(2, models.Count);
+        Assert.Contains(models, model => model.Id == "endpoint:Classic:shared-endpoint");
+        Assert.Contains(models, model => model.Id == "endpoint:LowEnergy:shared-endpoint");
+        Assert.Equal(
+            2,
+            Enumerable.Range(0, 2)
+                .Select(_ => ReadChange(manager).Kind)
+                .Count(kind => kind == BluetoothDeviceChangeKind.Added));
+    }
+
+    [Fact]
     public async Task Endpoint_identity_change_emits_removed_old_then_added_new()
     {
         await using var manager = new BluetoothDeviceManager();
