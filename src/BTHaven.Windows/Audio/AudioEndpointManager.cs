@@ -14,6 +14,9 @@ public sealed class AudioEndpointManager : IAudioEndpointService
         this.logger = logger ?? NullDiagnosticLogger.Instance;
     }
 
+    internal static Role GetDefaultRole(AudioEndpointDirection direction) =>
+        direction == AudioEndpointDirection.Render ? Role.Multimedia : Role.Communications;
+
     public Task<IReadOnlyList<AudioEndpointModel>> GetEndpointsAsync(
         AudioEndpointDirection direction,
         CancellationToken cancellationToken = default)
@@ -30,7 +33,7 @@ public sealed class AudioEndpointManager : IAudioEndpointService
         string? defaultId = null;
         try
         {
-            using var defaultDevice = enumerator.GetDefaultAudioEndpoint(dataFlow, Role.Communications);
+            using var defaultDevice = enumerator.GetDefaultAudioEndpoint(dataFlow, GetDefaultRole(direction));
             defaultId = defaultDevice.ID;
             logger.Info("Audio.DefaultEndpoint.Observed", new Dictionary<string, object?>
             {
