@@ -12,8 +12,8 @@ This file is the sanitized evidence ledger for the current Windows machine. It i
 | .NET runtime | `10.0.11`, `win-x64` |
 | MSBuild | `18.9.6+14fbf8d52` |
 | Bluetooth adapter | available; Classic and Low Energy both supported |
-| Current refresh | `2026-09-01T13:32:39Z`-`13:33:47Z` |
-| Verified HEAD | `4fa3740bea735c8ed4af9aa9273a195a3ec0b877` |
+| Current refresh | `2026-09-01T14:00:27Z`-`14:01:45Z` |
+| Verified HEAD | `606606e9615e44b8e714be7e1d016fb4d989d33b` |
 
 ## Status summary
 
@@ -117,20 +117,27 @@ The implementation and probes intentionally do not change phone volume. The publ
 ### Build
 
 ```text
-powershell.exe -NoProfile -Command '& "$env:USERPROFILE/.dotnet/dotnet.exe" restore BTHaven.slnx -p:Platform=x64'
+powershell.exe -NoProfile -Command 'git worktree add --detach "$env:TEMP\bthaven-verify-606606e" 606606e'
+powershell.exe -NoProfile -Command 'Set-Location "$env:TEMP\bthaven-verify-606606e"; & "$env:USERPROFILE\.dotnet\dotnet.exe" restore BTHaven.slnx -p:Platform=x64'
 Restored; 12 projects.
 
-powershell.exe -NoProfile -Command '& "$env:USERPROFILE/.dotnet/dotnet.exe" build BTHaven.slnx -c Release -p:Platform=x64 --no-restore'
+powershell.exe -NoProfile -Command 'Set-Location "$env:TEMP\bthaven-verify-606606e"; & "$env:USERPROFILE\.dotnet\dotnet.exe" build BTHaven.slnx -c Release -p:Platform=x64 --no-restore'
 Succeeded; 12/12 projects, 0 warnings, 0 errors.
 
-powershell.exe -NoProfile -Command '& "$env:USERPROFILE/.dotnet/dotnet.exe" build src/BTHaven.App/BTHaven.App.csproj -c Release -p:Platform=x64 --no-restore'
+powershell.exe -NoProfile -Command 'Set-Location "$env:TEMP\bthaven-verify-606606e"; & "$env:USERPROFILE\.dotnet\dotnet.exe" build src/BTHaven.App/BTHaven.App.csproj -c Release -p:Platform=x64 --no-restore'
 Succeeded; 0 warnings, 0 errors.
 
-powershell.exe -NoProfile -Command '& "$env:USERPROFILE/.dotnet/dotnet.exe" build src/BTHaven.Windows/BTHaven.Windows.csproj -c Release -p:Platform=x64 --no-restore'
+powershell.exe -NoProfile -Command 'Set-Location "$env:TEMP\bthaven-verify-606606e"; & "$env:USERPROFILE\.dotnet\dotnet.exe" build src/BTHaven.Windows/BTHaven.Windows.csproj -c Release -p:Platform=x64 --no-restore'
 Succeeded; 0 warnings, 0 errors.
 ```
 
-The clean detached worktree at HEAD `4fa3740` restored the solution and built all 12 project entries with zero warnings and zero errors. Separate App and Windows Release x64 builds also completed with zero warnings and zero errors. The tracked correlation and inspection/remote-volume source graph is included in that checkout.
+The clean detached worktree at HEAD `606606e` restored the solution and built all 12 project entries with zero warnings and zero errors. Separate App and Windows Release x64 builds also completed with zero warnings and zero errors.
+
+### Source graph
+
+The clean detached source graph scan reported `111` files, `13,097` lines, `0` parsed import edges, and quality signal `8768`. DSM statistics reported `edge_count=0`, `density=0`, and clean layering. The C# project graph was independently verified through `BTHaven.slnx`, which contains `12` project entries; the zero parsed-edge result is scanner output, not evidence that the projects have no dependencies.
+
+The tracked correlation, inspection, remote-volume, and App source graph is included in this checkout.
 
 ### Tests
 
@@ -142,6 +149,7 @@ The required serial no-build runs and the standard runs were both executed with 
 | `--no-build` | `BTHaven.IntegrationTests` | `62` total, `60` passed, `2` failed; exit `1` |
 | standard | `BTHaven.Core.Tests` | `22` total, `22` passed, `0` failed; exit `0` |
 | standard | `BTHaven.IntegrationTests` | `62` total, `60` passed, `2` failed; exit `1` |
+| standard and `--no-build`, targeted | A2DP sink and auto-reconnect | `14` total, `14` passed, `0` failed; exit `0` |
 | standard, targeted | conflicting ContainerId/address precedence | `1` total, `1` passed, `0` failed; exit `0` |
 | standard, manager focus | `BluetoothDeviceManagerTests` | `10` total, `10` passed, `0` failed; exit `0` |
 | `--no-build`, deterministic focus | manager, correlation, GATT, audio lifecycle, HFP, diagnostics, remote-volume | `54` total, `54` passed, `0` failed; exit `0` |
@@ -151,12 +159,12 @@ The two Integration failures are explicit environment limits, not skipped tests:
 1. `BluetoothDeviceInspectorTests.Inspection_includes_classic_and_ble_endpoints_for_the_connected_phone` failed with `Connected dual-mode Bluetooth hardware phone required.` The current run had no connected dual-mode phone.
 2. `WindowsAudioServicesSmokeTests.A2dp_service_opens_the_first_windows_remote_audio_target` failed because `A2dpSinkService.ConnectAsync` returned `false` (`Assert.True` expected `true`). Discovery found a target, but this Windows device/runtime did not open it.
 
-The final audit of commits `5315e91` and `4fa3740` against the identity specification found no unresolved P0/P1: promotion retains the fallback logical `DeviceId`, endpoint keys include transport, and conflicting non-empty `ContainerId` values take precedence over an equal address.
+The final audit of commits `5315e91`, `4fa3740`, and `606606e` against the requirements found no unresolved P0/P1: identity promotion and conflicting ContainerId precedence remain covered, and A2DP disable clears the logical-to-selector binding while invalidating exact-endpoint fallback.
 
 ## Dependency and secrets scans
 
 ```text
-powershell.exe -NoProfile -Command '& "$env:USERPROFILE/.dotnet/dotnet.exe" list BTHaven.slnx package --vulnerable --include-transitive'
+powershell.exe -NoProfile -Command '& "$env:USERPROFILE\.dotnet\dotnet.exe" list BTHaven.slnx package --vulnerable --include-transitive'
 No vulnerable packages reported for all 12 projects using the current NuGet source.
 
 where.exe osv-scanner
@@ -176,18 +184,23 @@ The second secrets scan covered source, test, and probe trees while excluding ge
 ### SDK, builds, and tests
 
 ```powershell
-powershell.exe -NoProfile -Command '& "$env:USERPROFILE/.dotnet/dotnet.exe" --info'
-powershell.exe -NoProfile -Command '& "$env:USERPROFILE/.dotnet/dotnet.exe" restore BTHaven.slnx -p:Platform=x64'
-powershell.exe -NoProfile -Command '& "$env:USERPROFILE/.dotnet/dotnet.exe" build BTHaven.slnx -c Release -p:Platform=x64 --no-restore'
-powershell.exe -NoProfile -Command '& "$env:USERPROFILE/.dotnet/dotnet.exe" build src/BTHaven.App/BTHaven.App.csproj -c Release -p:Platform=x64 --no-restore'
-powershell.exe -NoProfile -Command '& "$env:USERPROFILE/.dotnet/dotnet.exe" build src/BTHaven.Windows/BTHaven.Windows.csproj -c Release -p:Platform=x64 --no-restore'
-powershell.exe -NoProfile -Command '& "$env:USERPROFILE/.dotnet/dotnet.exe" test tests/BTHaven.IntegrationTests/BTHaven.IntegrationTests.csproj -c Release -m:1 --filter "FullyQualifiedName~Conflicting_container_ids_with_same_address_remain_separate_models" --logger "console;verbosity=normal"'
-powershell.exe -NoProfile -Command '& "$env:USERPROFILE/.dotnet/dotnet.exe" test tests/BTHaven.IntegrationTests/BTHaven.IntegrationTests.csproj -c Release -m:1 --filter "FullyQualifiedName~BluetoothDeviceManagerTests" --logger "console;verbosity=normal"'
-powershell.exe -NoProfile -Command '& "$env:USERPROFILE/.dotnet/dotnet.exe" test tests/BTHaven.Core.Tests/BTHaven.Core.Tests.csproj -c Release -m:1 --no-build --logger "console;verbosity=normal"'
-powershell.exe -NoProfile -Command '& "$env:USERPROFILE/.dotnet/dotnet.exe" test tests/BTHaven.IntegrationTests/BTHaven.IntegrationTests.csproj -c Release -m:1 --no-build --logger "console;verbosity=normal"'
-powershell.exe -NoProfile -Command '& "$env:USERPROFILE/.dotnet/dotnet.exe" test tests/BTHaven.Core.Tests/BTHaven.Core.Tests.csproj -c Release -m:1 --logger "console;verbosity=normal"'
-powershell.exe -NoProfile -Command '& "$env:USERPROFILE/.dotnet/dotnet.exe" test tests/BTHaven.IntegrationTests/BTHaven.IntegrationTests.csproj -c Release -m:1 --logger "console;verbosity=normal"'
-powershell.exe -NoProfile -Command '& "$env:USERPROFILE/.dotnet/dotnet.exe" test tests/BTHaven.IntegrationTests/BTHaven.IntegrationTests.csproj -c Release -m:1 --no-build --filter "FullyQualifiedName~BluetoothDeviceManagerTests|FullyQualifiedName~BluetoothDeviceInspectorMatchingTests|FullyQualifiedName~GattBatteryProviderTests|FullyQualifiedName~DiagnosticsExporterTests|FullyQualifiedName~TraceDiagnosticLoggerTests|FullyQualifiedName~HfpPhoneTransportServiceTests|FullyQualifiedName~HfpPhoneTransportServiceActivationTests|FullyQualifiedName~A2dpAutoReconnectServiceTests|FullyQualifiedName~A2dpSinkServiceTests|FullyQualifiedName~RemoteVolumeServiceTests" --logger "console;verbosity=normal"'
+git worktree add --detach "$env:TEMP\bthaven-verify-606606e" 606606e
+Set-Location "$env:TEMP\bthaven-verify-606606e"
+& "$env:USERPROFILE\.dotnet\dotnet.exe" --info
+& "$env:USERPROFILE\.dotnet\dotnet.exe" restore BTHaven.slnx -p:Platform=x64
+& "$env:USERPROFILE\.dotnet\dotnet.exe" build BTHaven.slnx -c Release -p:Platform=x64 --no-restore
+& "$env:USERPROFILE\.dotnet\dotnet.exe" build src/BTHaven.App/BTHaven.App.csproj -c Release -p:Platform=x64 --no-restore
+& "$env:USERPROFILE\.dotnet\dotnet.exe" build src/BTHaven.Windows/BTHaven.Windows.csproj -c Release -p:Platform=x64 --no-restore
+& "$env:USERPROFILE\.dotnet\dotnet.exe" test tests/BTHaven.Core.Tests/BTHaven.Core.Tests.csproj -c Release -m:1 --no-build --logger "console;verbosity=normal"
+& "$env:USERPROFILE\.dotnet\dotnet.exe" test tests/BTHaven.IntegrationTests/BTHaven.IntegrationTests.csproj -c Release -m:1 --no-build --logger "console;verbosity=normal"
+& "$env:USERPROFILE\.dotnet\dotnet.exe" test tests/BTHaven.Core.Tests/BTHaven.Core.Tests.csproj -c Release -m:1 --logger "console;verbosity=normal"
+& "$env:USERPROFILE\.dotnet\dotnet.exe" test tests/BTHaven.IntegrationTests/BTHaven.IntegrationTests.csproj -c Release -m:1 --logger "console;verbosity=normal"
+& "$env:USERPROFILE\.dotnet\dotnet.exe" test tests/BTHaven.IntegrationTests/BTHaven.IntegrationTests.csproj -c Release -m:1 --no-build --filter "FullyQualifiedName~A2dpAutoReconnectServiceTests|FullyQualifiedName~A2dpSinkServiceTests" --logger "console;verbosity=minimal"
+& "$env:USERPROFILE\.dotnet\dotnet.exe" test tests/BTHaven.IntegrationTests/BTHaven.IntegrationTests.csproj -c Release -m:1 --filter "FullyQualifiedName~A2dpAutoReconnectServiceTests|FullyQualifiedName~A2dpSinkServiceTests" --logger "console;verbosity=minimal"
+& "$env:USERPROFILE\.dotnet\dotnet.exe" test tests/BTHaven.IntegrationTests/BTHaven.IntegrationTests.csproj -c Release -m:1 --filter "FullyQualifiedName~Conflicting_container_ids_with_same_address_remain_separate_models" --logger "console;verbosity=minimal"
+& "$env:USERPROFILE\.dotnet\dotnet.exe" test tests/BTHaven.IntegrationTests/BTHaven.IntegrationTests.csproj -c Release -m:1 --filter "FullyQualifiedName~BluetoothDeviceManagerTests" --logger "console;verbosity=minimal"
+& "$env:USERPROFILE\.dotnet\dotnet.exe" test tests/BTHaven.IntegrationTests/BTHaven.IntegrationTests.csproj -c Release -m:1 --no-build --filter "FullyQualifiedName~BluetoothDeviceManagerTests|FullyQualifiedName~BluetoothDeviceInspectorMatchingTests|FullyQualifiedName~GattBatteryProviderTests|FullyQualifiedName~DiagnosticsExporterTests|FullyQualifiedName~TraceDiagnosticLoggerTests|FullyQualifiedName~HfpPhoneTransportServiceTests|FullyQualifiedName~HfpPhoneTransportServiceActivationTests|FullyQualifiedName~A2dpAutoReconnectServiceTests|FullyQualifiedName~A2dpSinkServiceTests|FullyQualifiedName~RemoteVolumeServiceTests" --logger "console;verbosity=minimal"
+git diff --check HEAD^ HEAD
 ```
 
 ### Read-only probes
@@ -201,12 +214,11 @@ powershell.exe -NoProfile -Command '& "./probes/05-call-audio-routing/bin/Releas
 powershell.exe -NoProfile -Command '& "./probes/06-device-inspection/bin/Release/net10.0-windows10.0.26100.0/BTHaven.Probe.DeviceInspection.exe"'
 ```
 
-All six probe processes were rerun read-only and exited `0` between `13:32:39Z` and `13:33:47Z`. Probe 03 omitted `--device-id`; probe 04 omitted `--request-access`, `--register`, and `--connect`; no MSIX or activation command was run.
+All six probe processes were rerun read-only and exited `0` between `14:00:32Z` and `14:01:39Z`. Probe 03 omitted `--device-id`; probe 04 omitted `--request-access`, `--register`, and `--connect`; no WinUI UI runtime, MSIX identity, packaging, installation, or activation command was run.
 
 ## Explicit boundaries
 
 - HFP access, registration, and connection activation were not run; no HFP activation flag was passed.
-- A2DP open/hold and audible playback were not run.
-- No MSIX publish, packaging, install, or deployment command was run.
+- A2DP open/hold and audible playback were not run by the probes.
+- No WinUI UI runtime was launched, and no MSIX publish, packaging, install, registration, deployment, or activation command was run.
 - The two hardware-dependent Integration failures above remain visible; they were not converted into skips or masked.
-- No production source or test files were modified during this final verification.
