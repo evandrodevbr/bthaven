@@ -20,6 +20,8 @@ public sealed partial class MainPage : Page
     private readonly AudioEndpointManager endpointManager;
     private readonly A2dpSinkService a2dpService;
     private readonly A2dpAutoReconnectService autoReconnectService;
+    private readonly WindowsRemoteVolumeService remoteVolumeService;
+    private readonly BluetoothDeviceInspector deviceInspector;
     private readonly HfpPhoneTransportService hfpService;
     private readonly DiagnosticsExporter diagnosticsExporter;
     private readonly TraceDiagnosticLogger logger;
@@ -31,6 +33,10 @@ public sealed partial class MainPage : Page
     private string? selectedA2dpDeviceId;
     private string? selectedHfpTransportId;
     private string? selectedOutputEndpointId;
+    private BluetoothDeviceInspectionSnapshot? selectedInspection;
+    private RemoteVolumeStatus? remoteVolumeStatus;
+    private string? activeMediaDeviceId;
+    private bool suppressMediaToggleEvents;
     private bool loaded;
     private bool ready;
     private bool disposed;
@@ -47,9 +53,17 @@ public sealed partial class MainPage : Page
         batteryService = new WindowsBatteryService(logger);
         endpointManager = new AudioEndpointManager(logger);
         a2dpService = new A2dpSinkService(logger);
+        a2dpService.StateChanged += A2dpService_StateChanged;
         autoReconnectService = new A2dpAutoReconnectService(a2dpService, logger);
         hfpService = new HfpPhoneTransportService(logger);
-        diagnosticsExporter = new DiagnosticsExporter(deviceManager, endpointManager, logger);
+        remoteVolumeService = new WindowsRemoteVolumeService(logger);
+        deviceInspector = new BluetoothDeviceInspector(
+            logger,
+            batteryService,
+            a2dpService,
+            hfpService,
+            remoteVolumeService);
+        diagnosticsExporter = new DiagnosticsExporter(deviceManager, endpointManager, logger, deviceInspector);
         logger.Info("App.MainPage.Created", new Dictionary<string, object?>
         {
             ["defaultFilter"] = BluetoothDeviceFilter.Connected.ToString(),
@@ -108,6 +122,7 @@ public sealed partial class MainPage : Page
         {
             try
             {
+                a2dpService.StateChanged -= A2dpService_StateChanged;
                 await deviceManager.DisposeAsync();
                 await batteryService.DisposeAsync();
                 await autoReconnectService.DisposeAsync();
@@ -392,13 +407,23 @@ public sealed partial class MainPage : Page
             .Where(device => BluetoothDeviceFilterMatcher.Matches(device, filter))
             .OrderByDescending(device => device.IsConnected)
             .ThenBy(device => device.Name, StringComparer.OrdinalIgnoreCase)
-            .Select(device => new DeviceRowViewModel(device))
+            .Select(device => new DeviceRowViewModel(
+                device,
+                string.Equals(activeMediaDeviceId, device.Id, StringComparison.OrdinalIgnoreCase)))
             .ToArray();
 
-        Rows.Clear();
-        foreach (var row in visible)
+        suppressMediaToggleEvents = true;
+        try
         {
-            Rows.Add(row);
+            Rows.Clear();
+            foreach (var row in visible)
+            {
+                Rows.Add(row);
+            }
+        }
+        finally
+        {
+            suppressMediaToggleEvents = false;
         }
 
         DeviceCountText.Text = visible.Length == 1 ? "1 dispositivo" : $"{visible.Length} dispositivos";
@@ -419,7 +444,7 @@ public sealed partial class MainPage : Page
 
     private async void DeviceList_SelectionChanged(object sender, SelectionChangedEventArgs e)
     {
-        await autoReconnectService.DisableAsync();
+        var previousSelectedDeviceId = selectedDeviceId;
         if (DeviceList.SelectedItem is not DeviceRowViewModel row || !devices.TryGetValue(row.Id, out var device))
         {
             logger.Info("App.Device.SelectionCleared");
@@ -429,6 +454,19 @@ public sealed partial class MainPage : Page
         }
 
         selectedDeviceId = device.Id;
+        if (!string.Equals(previousSelectedDeviceId, device.Id, StringComparison.OrdinalIgnoreCase))
+        {
+            selectedInspection = null;
+            selectedA2dpDeviceId = null;
+            selectedHfpTransportId = null;
+            MediaAudioButton.IsEnabled = false;
+            MediaAudioButton.Content = "Consultando alvo A2DP...";
+            A2dpTargetText.Text = "Alvo A2DP: aguardando consulta";
+            HfpEnableButton.IsEnabled = false;
+            HfpEnableButton.Content = "Consultando transporte HFP...";
+            HfpTransportText.Text = "Transporte HFP: aguardando consulta";
+            RenderRemoteVolumeStatus(null);
+        }
         logger.Info("App.Device.Selected", new Dictionary<string, object?>
         {
             ["deviceId"] = device.Id,
@@ -463,6 +501,10 @@ public sealed partial class MainPage : Page
             RefreshRows();
 
             var audioTargets = await a2dpService.GetAvailableDevicesAsync(lifetime.Token);
+            if (selectedDeviceId is null || !string.Equals(selectedDeviceId, device.Id, StringComparison.OrdinalIgnoreCase))
+            {
+                return;
+            }
             var matchingTargets = audioTargets.Where(target => MatchesDevice(device, target)).ToArray();
             foreach (var target in matchingTargets)
             {
@@ -525,6 +567,22 @@ public sealed partial class MainPage : Page
                 HfpStatusInfoBar.Message = "A ativação HFP só é suportada para dispositivos classificados como smartphone.";
             }
 
+            var remoteVolume = await remoteVolumeService.GetStatusAsync(device, lifetime.Token);
+            if (selectedDeviceId is null || !string.Equals(selectedDeviceId, device.Id, StringComparison.OrdinalIgnoreCase))
+            {
+                return;
+            }
+            RenderRemoteVolumeStatus(remoteVolume);
+            logger.Info("App.DeviceCapabilities.Completed", new Dictionary<string, object?>
+            {
+                ["deviceId"] = device.Id,
+                ["batterySource"] = battery.Source,
+                ["batteryPercentage"] = battery.Percentage,
+                ["a2dpCandidates"] = audioTargets.Count,
+                ["a2dpMatches"] = matchingTargets.Length,
+                ["hfpCandidates"] = hfpTargets.Count,
+                ["hfpMatches"] = matchingHfpTargets.Length,
+            });
         }
         catch (OperationCanceledException) when (lifetime.IsCancellationRequested)
         {
@@ -538,6 +596,10 @@ public sealed partial class MainPage : Page
             });
             A2dpTargetText.Text = "Falha ao consultar o alvo A2DP; consulte Logs.";
             HfpTransportText.Text = "Falha ao consultar o transporte HFP; consulte Logs.";
+            RemoteVolumeInfoBar.Severity = InfoBarSeverity.Error;
+            RemoteVolumeInfoBar.Title = "Falha ao consultar volume remoto";
+            RemoteVolumeInfoBar.Message = "O estado de volume não foi confirmado; consulte Logs.";
+            RemoteVolumeStatusText.Text = "Volume remoto: falha na consulta";
         }
     }
 
@@ -675,7 +737,8 @@ public sealed partial class MainPage : Page
             ["a2dpDeviceId"] = selectedA2dpDeviceId,
             ["outputEndpointId"] = selectedOutputEndpointId,
         });
-        if (selectedA2dpDeviceId is null)
+        var requestedA2dpDeviceId = selectedA2dpDeviceId;
+        if (requestedA2dpDeviceId is null)
         {
             StatusInfoBar.Severity = InfoBarSeverity.Warning;
             StatusInfoBar.Message = "Nenhum alvo A2DP oficial foi encontrado para este dispositivo.";
@@ -683,8 +746,7 @@ public sealed partial class MainPage : Page
         }
 
         var requestedDeviceId = selectedDeviceId;
-        var requestedA2dpDeviceId = selectedA2dpDeviceId;
-        if (requestedA2dpDeviceId is not null && requestedDeviceId is not null)
+        if (requestedDeviceId is not null)
         {
             a2dpLogicalDeviceIds[requestedA2dpDeviceId] = requestedDeviceId;
         }
@@ -911,6 +973,11 @@ public sealed partial class MainPage : Page
             : device.Battery?.IsCharging == true ? "Carregando · porcentagem indisponível" : "Indisponível";
         BatterySourceText.Text = device.Battery?.Source ?? "Aguardando consulta";
         CapabilitiesText.Text = FormatCapabilities(device);
+        InspectButton.IsEnabled = !disposed;
+        if (selectedInspection?.DeviceId == device.Id)
+        {
+            RenderInspection(selectedInspection);
+        }
     }
 
     private void ClearSelection()
@@ -924,6 +991,8 @@ public sealed partial class MainPage : Page
         BatteryText.Text = "—";
         BatterySourceText.Text = "—";
         CapabilitiesText.Text = "—";
+        selectedInspection = null;
+        remoteVolumeStatus = null;
         selectedA2dpDeviceId = null;
         selectedHfpTransportId = null;
         MediaAudioButton.IsEnabled = false;
@@ -935,6 +1004,53 @@ public sealed partial class MainPage : Page
         HfpStatusInfoBar.Severity = InfoBarSeverity.Warning;
         HfpStatusInfoBar.Title = "HFP aguardando teste";
         HfpStatusInfoBar.Message = "Selecione um smartphone e use o botão para solicitar o acesso real ao transporte telefônico.";
+        InspectButton.IsEnabled = false;
+        InspectionStatusText.Text = "Nenhuma inspeção executada";
+        InspectionTextBox.Text = "Selecione um dispositivo e execute a inspeção detalhada.";
+        RenderRemoteVolumeStatus(null);
+    }
+
+    private void RenderRemoteVolumeStatus(RemoteVolumeStatus? status)
+    {
+        remoteVolumeStatus = status;
+        if (status is null)
+        {
+            RemoteVolumeInfoBar.Severity = InfoBarSeverity.Informational;
+            RemoteVolumeInfoBar.Title = "Volume remoto aguardando consulta";
+            RemoteVolumeInfoBar.Message = "Selecione um dispositivo para consultar a capacidade real.";
+            RemoteVolumeStatusText.Text = "Volume remoto: aguardando seleção";
+            RemoteVolumeSlider.IsEnabled = false;
+            RemoteVolumeButton.IsEnabled = false;
+            return;
+        }
+
+        var canControl = status.CanControl && selectedDeviceId is not null && !disposed;
+        RemoteVolumeInfoBar.Severity = status.Availability switch
+        {
+            RemoteVolumeAvailability.Available => InfoBarSeverity.Success,
+            RemoteVolumeAvailability.Failed => InfoBarSeverity.Error,
+            _ => InfoBarSeverity.Warning,
+        };
+        RemoteVolumeInfoBar.Title = status.Availability switch
+        {
+            RemoteVolumeAvailability.Available => "Volume remoto disponível",
+            RemoteVolumeAvailability.NotExposed => "Volume remoto não exposto",
+            RemoteVolumeAvailability.Failed => "Falha no volume remoto",
+            _ => "Volume remoto desconhecido",
+        };
+        RemoteVolumeInfoBar.Message = status.Message ?? "O Windows não retornou uma explicação adicional.";
+        RemoteVolumeStatusText.Text = status.Level is float level
+            ? $"Volume remoto: {level:P0} · origem: {status.Source}"
+            : $"Volume remoto: {status.Availability} · origem: {status.Source}";
+        RemoteVolumeSlider.IsEnabled = canControl;
+        RemoteVolumeButton.IsEnabled = canControl;
+    }
+
+    private void RenderInspection(BluetoothDeviceInspectionSnapshot snapshot)
+    {
+        InspectionStatusText.Text = $"Concluída em {snapshot.ObservedAt.ToLocalTime():HH:mm:ss}: {snapshot.Endpoints.Count} endpoint(s), {snapshot.GattServices.Count} GATT, {snapshot.RfcommServices.Count} RFCOMM, {snapshot.Diagnostics.Count} diagnóstico(s).";
+        InspectionTextBox.Text = BluetoothInspectionTextFormatter.Format(snapshot);
+        RenderRemoteVolumeStatus(snapshot.RemoteVolume);
     }
 
     private static bool MatchesDevice(BluetoothDeviceModel device, RemoteAudioDeviceInfo target)
