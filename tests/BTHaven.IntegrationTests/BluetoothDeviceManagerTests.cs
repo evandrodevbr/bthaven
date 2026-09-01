@@ -103,6 +103,33 @@ public sealed class BluetoothDeviceManagerTests
     }
 
     [Fact]
+    public async Task Incomplete_update_keeps_logical_identity_for_same_endpoint()
+    {
+        await using var manager = new BluetoothDeviceManager();
+        var original = Observation("endpoint", BluetoothTransport.Classic, "container-stable", "001122334455");
+        manager.ApplyObservationForTesting(original);
+        _ = ReadChange(manager);
+
+        manager.ApplyObservationForTesting(original with
+        {
+            ContainerId = null,
+            Address = null,
+        });
+
+        var updated = ReadChange(manager);
+        Assert.Equal(BluetoothDeviceChangeKind.Updated, updated.Kind);
+        Assert.Equal("container:CONTAINER-STABLE", updated.DeviceId);
+        Assert.NotNull(updated.Device);
+        Assert.Equal(updated.DeviceId, updated.Device!.Id);
+        var endpoint = Assert.Single(updated.Device.Endpoints);
+        Assert.Equal(original.Id, endpoint.Id);
+        Assert.Equal(original.Transport, endpoint.Transport);
+        Assert.Equal(original.ContainerId, endpoint.ContainerId);
+        Assert.Equal(original.Address, endpoint.Address);
+        Assert.False(manager.TryReadChangeForTesting(out _));
+    }
+
+    [Fact]
     public async Task Endpoint_identity_change_emits_removed_old_then_added_new()
     {
         await using var manager = new BluetoothDeviceManager();

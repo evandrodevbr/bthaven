@@ -296,13 +296,18 @@ public sealed class BluetoothDeviceManager : IBluetoothDeviceService, IAsyncDisp
         BluetoothDeviceModel? before;
         BluetoothDeviceModel? after;
         BluetoothDeviceModel? oldGroupAfter = null;
+        BluetoothDeviceObservation effectiveObservation;
         string? oldLogicalKey;
-        var newLogicalKey = LogicalKey(observation);
+        string newLogicalKey;
 
         lock (sync)
         {
             endpointObservations.TryGetValue(observation.Id, out var previous);
+            effectiveObservation = previous is null
+                ? observation
+                : RetainPreviousIdentityIfIncomplete(previous, observation);
             oldLogicalKey = previous is null ? null : LogicalKey(previous);
+            newLogicalKey = LogicalKey(effectiveObservation);
             var beforeLogicalKey = oldLogicalKey ?? newLogicalKey;
             before = BuildModelLocked(beforeLogicalKey);
 
@@ -311,7 +316,7 @@ public sealed class BluetoothDeviceManager : IBluetoothDeviceService, IAsyncDisp
                 endpointObservations.Remove(observation.Id);
             }
 
-            endpointObservations[observation.Id] = observation;
+            endpointObservations[effectiveObservation.Id] = effectiveObservation;
             after = BuildModelLocked(newLogicalKey);
             if (oldLogicalKey is not null && !string.Equals(oldLogicalKey, newLogicalKey, StringComparison.OrdinalIgnoreCase))
             {
@@ -333,22 +338,54 @@ public sealed class BluetoothDeviceManager : IBluetoothDeviceService, IAsyncDisp
 
         logger.Info(before is null ? "Bluetooth.Device.Added" : "Bluetooth.Device.Updated", new Dictionary<string, object?>
         {
-            ["deviceId"] = observation.Id,
-            ["name"] = observation.Name,
-            ["transport"] = observation.Transport.ToString(),
-            ["isPaired"] = observation.IsPaired,
-            ["isConnected"] = observation.IsConnected,
-            ["isPresent"] = observation.IsPresent,
-            ["address"] = observation.Address,
-            ["containerId"] = observation.ContainerId,
-            ["manufacturer"] = observation.Manufacturer,
-            ["model"] = observation.Model,
-            ["rssi"] = observation.Rssi,
-            ["category"] = observation.Category.ToString(),
-            ["categories"] = observation.Categories,
-            ["capabilities"] = observation.Capabilities.ToString(),
+            ["deviceId"] = effectiveObservation.Id,
+            ["name"] = effectiveObservation.Name,
+            ["transport"] = effectiveObservation.Transport.ToString(),
+            ["isPaired"] = effectiveObservation.IsPaired,
+            ["isConnected"] = effectiveObservation.IsConnected,
+            ["isPresent"] = effectiveObservation.IsPresent,
+            ["address"] = effectiveObservation.Address,
+            ["containerId"] = effectiveObservation.ContainerId,
+            ["manufacturer"] = effectiveObservation.Manufacturer,
+            ["model"] = effectiveObservation.Model,
+            ["rssi"] = effectiveObservation.Rssi,
+            ["category"] = effectiveObservation.Category.ToString(),
+            ["categories"] = effectiveObservation.Categories,
+            ["capabilities"] = effectiveObservation.Capabilities.ToString(),
             ["logicalKey"] = newLogicalKey,
         });
+    }
+
+    private static BluetoothDeviceObservation RetainPreviousIdentityIfIncomplete(
+        BluetoothDeviceObservation previous,
+        BluetoothDeviceObservation current)
+    {
+        if (!string.IsNullOrWhiteSpace(current.ContainerId))
+        {
+            return current;
+        }
+
+        if (!string.IsNullOrWhiteSpace(previous.ContainerId))
+        {
+            var currentAddress = BluetoothDeviceIdentity.NormalizeAddress(current.Address);
+            var previousAddress = BluetoothDeviceIdentity.NormalizeAddress(previous.Address);
+            if (currentAddress.Length > 0
+                && previousAddress.Length > 0
+                && !string.Equals(currentAddress, previousAddress, StringComparison.Ordinal))
+            {
+                return current;
+            }
+
+            return current with
+            {
+                ContainerId = previous.ContainerId,
+                Address = string.IsNullOrWhiteSpace(current.Address) ? previous.Address : current.Address,
+            };
+        }
+
+        return string.IsNullOrWhiteSpace(current.Address) && !string.IsNullOrWhiteSpace(previous.Address)
+            ? current with { Address = previous.Address }
+            : current;
     }
 
     private void PublishChange(
