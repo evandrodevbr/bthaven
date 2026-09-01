@@ -34,6 +34,7 @@ public sealed partial class MainPage : Page
     private bool loaded;
     private bool ready;
     private bool disposed;
+    private readonly Dictionary<string, string> a2dpLogicalDeviceIds = new(StringComparer.OrdinalIgnoreCase);
 
     public ObservableCollection<DeviceRowViewModel> Rows { get; } = [];
 
@@ -141,6 +142,13 @@ public sealed partial class MainPage : Page
             {
                 devices[device.Id] = device;
             }
+            foreach (var mapping in a2dpLogicalDeviceIds
+                         .Where(mapping => !devices.ContainsKey(mapping.Value))
+                         .Select(mapping => mapping.Key)
+                         .ToArray())
+            {
+                a2dpLogicalDeviceIds.Remove(mapping);
+            }
             if (selectedDeviceId is not null && !devices.ContainsKey(selectedDeviceId))
             {
                 selectedDeviceId = null;
@@ -246,6 +254,13 @@ public sealed partial class MainPage : Page
         if (change.Kind == BluetoothDeviceChangeKind.Removed)
         {
             devices.Remove(change.DeviceId);
+            foreach (var mapping in a2dpLogicalDeviceIds
+                         .Where(mapping => string.Equals(mapping.Value, change.DeviceId, StringComparison.OrdinalIgnoreCase))
+                         .Select(mapping => mapping.Key)
+                         .ToArray())
+            {
+                a2dpLogicalDeviceIds.Remove(mapping);
+            }
             if (string.Equals(activeMediaDeviceId, change.DeviceId, StringComparison.OrdinalIgnoreCase))
             {
                 activeMediaDeviceId = null;
@@ -262,20 +277,19 @@ public sealed partial class MainPage : Page
             if (string.Equals(selectedDeviceId, change.DeviceId, StringComparison.OrdinalIgnoreCase))
             {
                 if (selectedA2dpDeviceId is not null
-                    && !change.Device.Endpoints.Any(endpoint =>
-                        string.Equals(endpoint.Id, selectedA2dpDeviceId, StringComparison.OrdinalIgnoreCase)))
+                    && a2dpLogicalDeviceIds.TryGetValue(selectedA2dpDeviceId, out var mappedDeviceId)
+                    && !string.Equals(mappedDeviceId, change.DeviceId, StringComparison.OrdinalIgnoreCase))
                 {
                     selectedA2dpDeviceId = null;
                     MediaAudioButton.IsEnabled = false;
                     A2dpTargetText.Text = "Alvo A2DP: aguardando nova consulta";
                 }
-                if (selectedHfpTransportId is not null
-                    && !change.Device.Endpoints.Any(endpoint =>
-                        string.Equals(endpoint.Id, selectedHfpTransportId, StringComparison.OrdinalIgnoreCase)))
+                if (change.Device.Category != BluetoothDeviceCategory.Smartphone)
                 {
                     selectedHfpTransportId = null;
                     HfpEnableButton.IsEnabled = false;
-                    HfpTransportText.Text = "Transporte HFP: aguardando nova consulta";
+                    HfpEnableButton.Content = "HFP disponível apenas para smartphones";
+                    HfpTransportText.Text = "Transporte HFP: não aplicável a esta categoria";
                 }
                 RenderSelection(change.Device);
             }
@@ -293,6 +307,11 @@ public sealed partial class MainPage : Page
 
         var eventDeviceId = a2dpService.DeviceId;
         var observedServiceState = a2dpService.State;
+        var mappedLogicalDeviceId = eventDeviceId is not null
+            && a2dpLogicalDeviceIds.TryGetValue(eventDeviceId, out var mappedDeviceId)
+            && devices.ContainsKey(mappedDeviceId)
+            ? mappedDeviceId
+            : null;
         var matchingLogicalIds = state == MediaAudioSinkState.Opened && eventDeviceId is not null
             ? devices.Values
                 .Where(device => device.Endpoints.Any(endpoint =>
@@ -301,7 +320,8 @@ public sealed partial class MainPage : Page
                 .Distinct(StringComparer.OrdinalIgnoreCase)
                 .ToArray()
             : [];
-        var logicalDeviceId = matchingLogicalIds.Length == 1 ? matchingLogicalIds[0] : null;
+        var logicalDeviceId = mappedLogicalDeviceId
+            ?? (matchingLogicalIds.Length == 1 ? matchingLogicalIds[0] : null);
 
         logger.Debug("App.A2DP.StateChanged", new Dictionary<string, object?>
         {
@@ -313,6 +333,11 @@ public sealed partial class MainPage : Page
         void ApplyState()
         {
             if (disposed || a2dpService.State != observedServiceState)
+            {
+                return;
+            }
+            if (state == MediaAudioSinkState.Opened
+                && !string.Equals(a2dpService.DeviceId, eventDeviceId, StringComparison.OrdinalIgnoreCase))
             {
                 return;
             }
@@ -428,6 +453,13 @@ public sealed partial class MainPage : Page
 
             var audioTargets = await a2dpService.GetAvailableDevicesAsync(lifetime.Token);
             var matchingTargets = audioTargets.Where(target => MatchesDevice(device, target)).ToArray();
+            foreach (var target in matchingTargets)
+            {
+                if (!string.IsNullOrWhiteSpace(target.Id))
+                {
+                    a2dpLogicalDeviceIds[target.Id] = device.Id;
+                }
+            }
             selectedA2dpDeviceId = matchingTargets.Length == 1 ? matchingTargets[0].Id : null;
             A2dpTargetText.Text = matchingTargets.Length switch
             {
@@ -641,6 +673,10 @@ public sealed partial class MainPage : Page
 
         var requestedDeviceId = selectedDeviceId;
         var requestedA2dpDeviceId = selectedA2dpDeviceId;
+        if (requestedA2dpDeviceId is not null && requestedDeviceId is not null)
+        {
+            a2dpLogicalDeviceIds[requestedA2dpDeviceId] = requestedDeviceId;
+        }
         MediaAudioButton.IsEnabled = false;
         try
         {
@@ -800,7 +836,10 @@ public sealed partial class MainPage : Page
         }
         finally
         {
-            HfpEnableButton.IsEnabled = selectedDeviceId is not null && !disposed;
+            HfpEnableButton.IsEnabled = !disposed
+                && selectedDeviceId is not null
+                && devices.TryGetValue(selectedDeviceId, out var currentDevice)
+                && currentDevice.Category == BluetoothDeviceCategory.Smartphone;
         }
     }
 
@@ -889,6 +928,13 @@ public sealed partial class MainPage : Page
 
     private static bool MatchesDevice(BluetoothDeviceModel device, RemoteAudioDeviceInfo target)
     {
+        if (!string.IsNullOrWhiteSpace(target.Id)
+            && device.Endpoints.Any(endpoint =>
+                string.Equals(endpoint.Id, target.Id, StringComparison.OrdinalIgnoreCase)))
+        {
+            return true;
+        }
+
         if (!string.IsNullOrWhiteSpace(device.ContainerId)
             && !string.IsNullOrWhiteSpace(target.ContainerId)
             && string.Equals(device.ContainerId, target.ContainerId, StringComparison.OrdinalIgnoreCase))
