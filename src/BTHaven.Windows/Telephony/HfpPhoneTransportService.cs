@@ -1,21 +1,34 @@
 using BTHaven.Core.Calls;
 using BTHaven.Core.Contracts;
 using BTHaven.Windows.Diagnostics;
-using Windows.ApplicationModel.Calls;
 using Windows.Devices.Enumeration;
-using Windows.Foundation.Metadata;
 
 namespace BTHaven.Windows.Telephony;
 
 public sealed class HfpPhoneTransportService : IPhoneTransport, IAsyncDisposable
 {
     private readonly object sync = new();
+    private readonly SemaphoreSlim lifecycleGate = new(1, 1);
     private readonly IWindowsDiagnosticLogger logger;
-    private PhoneLineTransportDevice? activeDevice;
+    private readonly Func<string, IHfpTransportDevice> deviceFactory;
+    private readonly Func<bool> capabilityProbe;
+    private IHfpTransportDevice? activeDevice;
     private CallState state = CallState.Disconnected;
 
     public HfpPhoneTransportService(IWindowsDiagnosticLogger? logger = null)
+        : this(HfpTransportAdapters.FromId, HfpTransportAdapters.IsSupported, logger)
     {
+    }
+
+    internal HfpPhoneTransportService(
+        Func<string, IHfpTransportDevice> deviceFactory,
+        Func<bool> capabilityProbe,
+        IWindowsDiagnosticLogger? logger = null)
+    {
+        ArgumentNullException.ThrowIfNull(deviceFactory);
+        ArgumentNullException.ThrowIfNull(capabilityProbe);
+        this.deviceFactory = deviceFactory;
+        this.capabilityProbe = capabilityProbe;
         this.logger = logger ?? NullDiagnosticLogger.Instance;
     }
 
@@ -34,21 +47,19 @@ public sealed class HfpPhoneTransportService : IPhoneTransport, IAsyncDisposable
         CancellationToken cancellationToken = default)
     {
         cancellationToken.ThrowIfCancellationRequested();
-        const string typeName = "Windows.ApplicationModel.Calls.PhoneLineTransportDevice";
-        const string contractName = "Windows.ApplicationModel.Calls.CallsPhoneContract";
-        var typePresent = ApiInformation.IsTypePresent(typeName);
-        var contractPresent = ApiInformation.IsApiContractPresent(contractName, 5);
+        var typePresent = HfpTransportAdapters.IsTypePresent();
+        var contractPresent = HfpTransportAdapters.IsContractPresent();
         logger.Info("HFP.Discovery.Started", new Dictionary<string, object?>
         {
-            ["typeName"] = typeName,
+            ["typeName"] = "Windows.ApplicationModel.Calls.PhoneLineTransportDevice",
             ["typePresent"] = typePresent,
-            ["contractName"] = contractName,
+            ["contractName"] = "Windows.ApplicationModel.Calls.CallsPhoneContract",
             ["contractV5Present"] = contractPresent,
         });
 
         try
         {
-            var selector = PhoneLineTransportDevice.GetDeviceSelector();
+            var selector = HfpTransportAdapters.GetDeviceSelector();
             logger.Debug("HFP.Selector.Created", new Dictionary<string, object?>
             {
                 ["selector"] = selector,
@@ -60,14 +71,14 @@ public sealed class HfpPhoneTransportService : IPhoneTransport, IAsyncDisposable
                 cancellationToken.ThrowIfCancellationRequested();
                 try
                 {
-                    var transportDevice = PhoneLineTransportDevice.FromId(info.Id);
+                    using var transportDevice = deviceFactory(info.Id);
                     var model = new PhoneLineTransportModel
                     {
                         Id = info.Id,
                         Name = info.Name,
                         DeviceId = transportDevice.DeviceId,
-                        Transport = transportDevice.Transport.ToString(),
-                        AudioRoutingStatus = transportDevice.AudioRoutingStatus.ToString(),
+                        Transport = transportDevice.Transport,
+                        AudioRoutingStatus = transportDevice.AudioRoutingStatus,
                         InBandRingingEnabled = transportDevice.InBandRingingEnabled,
                         IsRegistered = transportDevice.IsRegistered(),
                     };
@@ -122,12 +133,29 @@ public sealed class HfpPhoneTransportService : IPhoneTransport, IAsyncDisposable
             ["deviceId"] = transportDeviceId,
         });
 
-        PhoneLineTransportDevice? candidate = null;
+        await lifecycleGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        IHfpTransportDevice? candidate = null;
         try
         {
-            candidate = PhoneLineTransportDevice.FromId(transportDeviceId);
-            var access = await candidate.RequestAccessAsync();
-            var accessStatus = access.ToString();
+            cancellationToken.ThrowIfCancellationRequested();
+            DisconnectCurrent();
+            if (!capabilityProbe())
+            {
+                SetState(CallState.Error);
+                return new PhoneLineTransportActivationResult
+                {
+                    Succeeded = false,
+                    Status = "NotSupported",
+                    Message = "A API PhoneLineTransportDevice não está disponível nesta versão do Windows.",
+                    IsRegistered = false,
+                    IsConnected = false,
+                };
+            }
+
+            candidate = deviceFactory(transportDeviceId);
+            cancellationToken.ThrowIfCancellationRequested();
+            var accessStatus = await candidate.RequestAccessAsync().ConfigureAwait(false);
+            cancellationToken.ThrowIfCancellationRequested();
             logger.Info("HFP.Access.Result", new Dictionary<string, object?>
             {
                 ["deviceId"] = transportDeviceId,
@@ -148,6 +176,7 @@ public sealed class HfpPhoneTransportService : IPhoneTransport, IAsyncDisposable
             }
 
             candidate.RegisterApp();
+            cancellationToken.ThrowIfCancellationRequested();
             var isRegistered = candidate.IsRegistered();
             logger.Info("HFP.Registration.Result", new Dictionary<string, object?>
             {
@@ -169,12 +198,13 @@ public sealed class HfpPhoneTransportService : IPhoneTransport, IAsyncDisposable
             }
 
             SetState(CallState.Connecting);
-            var connected = await candidate.ConnectAsync();
+            var connected = await candidate.ConnectAsync().ConfigureAwait(false);
+            cancellationToken.ThrowIfCancellationRequested();
             logger.Info("HFP.Connection.Result", new Dictionary<string, object?>
             {
                 ["deviceId"] = transportDeviceId,
                 ["connected"] = connected,
-                ["audioRoutingStatus"] = candidate.AudioRoutingStatus.ToString(),
+                ["audioRoutingStatus"] = candidate.AudioRoutingStatus,
             });
             if (!connected)
             {
@@ -231,6 +261,11 @@ public sealed class HfpPhoneTransportService : IPhoneTransport, IAsyncDisposable
                 IsConnected = false,
             };
         }
+        finally
+        {
+            candidate?.Dispose();
+            lifecycleGate.Release();
+        }
     }
 
     public async Task<bool> ConnectAsync(string deviceId, CancellationToken cancellationToken = default)
@@ -239,20 +274,36 @@ public sealed class HfpPhoneTransportService : IPhoneTransport, IAsyncDisposable
         return result.Succeeded;
     }
 
-    public Task DisconnectAsync(CancellationToken cancellationToken = default)
+    public async Task DisconnectAsync(CancellationToken cancellationToken = default)
     {
         cancellationToken.ThrowIfCancellationRequested();
+        await lifecycleGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            DisconnectCurrent();
+        }
+        finally
+        {
+            lifecycleGate.Release();
+        }
+    }
+
+    private void DisconnectCurrent()
+    {
+        IHfpTransportDevice? oldDevice;
         lock (sync)
         {
+            oldDevice = activeDevice;
             activeDevice = null;
             state = CallState.Disconnecting;
         }
+
         logger.Warning("HFP.Connection.DisconnectNotExposed", new Dictionary<string, object?>
         {
             ["reason"] = "PhoneLineTransportDevice has no public disconnect method",
         });
+        oldDevice?.Dispose();
         SetState(CallState.Disconnected);
-        return Task.CompletedTask;
     }
 
     public ValueTask DisposeAsync() => new(DisconnectAsync());
