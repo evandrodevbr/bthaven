@@ -4,11 +4,26 @@ using BTHaven.Windows.Diagnostics;
 
 namespace BTHaven.Windows.Audio;
 
+internal interface IA2dpReconnectSink
+{
+    bool IsEnabled { get; }
+    string? DeviceId { get; }
+    MediaAudioSinkState State { get; }
+    event Action<MediaAudioSinkState>? StateChanged;
+    Task<IReadOnlyList<RemoteAudioDeviceInfo>> GetAvailableDevicesAsync(
+        CancellationToken cancellationToken = default);
+    Task<bool> ConnectAsync(
+        string requestedDeviceId,
+        CancellationToken cancellationToken = default);
+}
+
 public sealed class A2dpAutoReconnectService : IAsyncDisposable
 {
     private readonly object sync = new();
-    private readonly A2dpSinkService sink;
+    private readonly IA2dpReconnectSink sink;
     private readonly IWindowsDiagnosticLogger logger;
+    private readonly Func<TimeSpan, CancellationToken, Task> delayAsync;
+    private readonly TimeSpan stateChangeTimeout;
     private CancellationTokenSource? cancellation;
     private Task? loop;
     private string? targetId;
@@ -16,9 +31,27 @@ public sealed class A2dpAutoReconnectService : IAsyncDisposable
     public A2dpAutoReconnectService(
         A2dpSinkService sink,
         IWindowsDiagnosticLogger? logger = null)
+        : this(
+            sink,
+            logger,
+            static (duration, cancellationToken) => Task.Delay(duration, cancellationToken))
+    {
+    }
+
+    internal A2dpAutoReconnectService(
+        IA2dpReconnectSink sink,
+        IWindowsDiagnosticLogger? logger = null,
+        Func<TimeSpan, CancellationToken, Task>? delayAsync = null,
+        TimeSpan? stateChangeTimeout = null)
     {
         this.sink = sink ?? throw new ArgumentNullException(nameof(sink));
         this.logger = logger ?? NullDiagnosticLogger.Instance;
+        this.delayAsync = delayAsync ?? ((duration, cancellationToken) => Task.Delay(duration, cancellationToken));
+        this.stateChangeTimeout = stateChangeTimeout ?? TimeSpan.FromSeconds(30);
+        if (this.stateChangeTimeout < TimeSpan.Zero)
+        {
+            throw new ArgumentOutOfRangeException(nameof(stateChangeTimeout));
+        }
     }
 
     public bool IsEnabled
@@ -165,7 +198,7 @@ public sealed class A2dpAutoReconnectService : IAsyncDisposable
             ["deviceId"] = requestedDeviceId,
             ["delaySeconds"] = delay.TotalSeconds,
         });
-        await Task.Delay(delay, cancellationToken).ConfigureAwait(false);
+        await delayAsync(delay, cancellationToken).ConfigureAwait(false);
     }
 
     private async Task WaitForStateChangeOrTimeoutAsync(CancellationToken cancellationToken)
@@ -173,13 +206,25 @@ public sealed class A2dpAutoReconnectService : IAsyncDisposable
         var signal = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
         void OnStateChanged(MediaAudioSinkState _) => signal.TrySetResult(true);
         sink.StateChanged += OnStateChanged;
+
+        using var timeoutCancellation = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        var timeout = delayAsync(stateChangeTimeout, timeoutCancellation.Token);
         try
         {
-            await Task.WhenAny(signal.Task, Task.Delay(TimeSpan.FromSeconds(30), cancellationToken)).ConfigureAwait(false);
+            await Task.WhenAny(signal.Task, timeout).ConfigureAwait(false);
             cancellationToken.ThrowIfCancellationRequested();
         }
         finally
         {
+            timeoutCancellation.Cancel();
+            try
+            {
+                await timeout.ConfigureAwait(false);
+            }
+            catch (OperationCanceledException) when (timeoutCancellation.IsCancellationRequested)
+            {
+            }
+
             sink.StateChanged -= OnStateChanged;
         }
     }

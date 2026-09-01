@@ -12,7 +12,7 @@ public sealed record RemoteAudioDeviceInfo(
     string? ContainerId,
     string? Address);
 
-public sealed class A2dpSinkService : IMediaAudioSink, IAsyncDisposable
+public sealed class A2dpSinkService : IMediaAudioSink, IA2dpReconnectSink, IAsyncDisposable
 {
     private static readonly IReadOnlyList<string> RequestedProperties =
     [
