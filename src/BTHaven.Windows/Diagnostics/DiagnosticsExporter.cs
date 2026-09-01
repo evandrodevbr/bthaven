@@ -329,7 +329,7 @@ public sealed class DiagnosticsExporter
             },
             gatt = snapshot.GattServices.Select(service => new
             {
-                uuid = service.Uuid,
+                uuid = Redact(service.Uuid) ?? "<redacted>",
                 attributeHandle = service.AttributeHandle,
                 status = service.Status,
                 source = service.Source,
@@ -338,10 +338,10 @@ public sealed class DiagnosticsExporter
                 message = service.Message is null ? null : "<redacted>",
                 characteristics = service.Characteristics.Select(characteristic => new
                 {
-                    uuid = characteristic.Uuid,
+                    uuid = Redact(characteristic.Uuid) ?? "<redacted>",
                     attributeHandle = characteristic.AttributeHandle,
                     properties = characteristic.Properties,
-                    userDescription = characteristic.UserDescription,
+                    userDescription = characteristic.UserDescription is null ? null : "<redacted>",
                     status = characteristic.Status,
                     descriptorStatus = characteristic.DescriptorStatus,
                     source = characteristic.Source,
@@ -350,7 +350,7 @@ public sealed class DiagnosticsExporter
                     message = characteristic.Message is null ? null : "<redacted>",
                     descriptors = characteristic.Descriptors.Select(descriptor => new
                     {
-                        uuid = descriptor.Uuid,
+                        uuid = Redact(descriptor.Uuid) ?? "<redacted>",
                         attributeHandle = descriptor.AttributeHandle,
                         source = descriptor.Source,
                         observedAt = descriptor.ObservedAt,
@@ -362,7 +362,7 @@ public sealed class DiagnosticsExporter
             rfcomm = snapshot.RfcommServices.Select(service => new
             {
                 serviceId = Redact(service.ServiceId),
-                knownName = service.KnownName,
+                knownName = service.KnownName is null ? null : "<redacted>",
                 deviceId = Redact(service.DeviceId),
                 source = service.Source,
                 status = service.Status,

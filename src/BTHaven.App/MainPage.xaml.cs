@@ -268,6 +268,13 @@ public sealed partial class MainPage : Page
         });
         if (change.Kind == BluetoothDeviceChangeKind.Removed)
         {
+            var selectedTargetMapsRemovedDevice = selectedA2dpDeviceId is not null
+                && a2dpLogicalDeviceIds.TryGetValue(selectedA2dpDeviceId, out var mappedDeviceId)
+                && string.Equals(mappedDeviceId, change.DeviceId, StringComparison.OrdinalIgnoreCase);
+            var selectedTargetIsRemovedEndpoint = selectedA2dpDeviceId is not null
+                && !string.IsNullOrWhiteSpace(change.EndpointId)
+                && string.Equals(selectedA2dpDeviceId, change.EndpointId, StringComparison.OrdinalIgnoreCase);
+
             devices.Remove(change.DeviceId);
             foreach (var mapping in a2dpLogicalDeviceIds
                          .Where(mapping => string.Equals(mapping.Value, change.DeviceId, StringComparison.OrdinalIgnoreCase))
@@ -275,6 +282,12 @@ public sealed partial class MainPage : Page
                          .ToArray())
             {
                 a2dpLogicalDeviceIds.Remove(mapping);
+            }
+            if (selectedTargetMapsRemovedDevice || selectedTargetIsRemovedEndpoint)
+            {
+                selectedA2dpDeviceId = null;
+                MediaAudioButton.IsEnabled = false;
+                A2dpTargetText.Text = "Alvo A2DP removido; aguardando nova consulta";
             }
             if (string.Equals(activeMediaDeviceId, change.DeviceId, StringComparison.OrdinalIgnoreCase))
             {
@@ -291,9 +304,13 @@ public sealed partial class MainPage : Page
             devices[change.DeviceId] = change.Device;
             if (string.Equals(selectedDeviceId, change.DeviceId, StringComparison.OrdinalIgnoreCase))
             {
-                if (selectedA2dpDeviceId is not null
+                var selectedTargetIsUpdatedEndpoint = selectedA2dpDeviceId is not null
+                    && !string.IsNullOrWhiteSpace(change.EndpointId)
+                    && string.Equals(selectedA2dpDeviceId, change.EndpointId, StringComparison.OrdinalIgnoreCase);
+                var selectedTargetMappingsChangedDevice = selectedA2dpDeviceId is not null
                     && a2dpLogicalDeviceIds.TryGetValue(selectedA2dpDeviceId, out var mappedDeviceId)
-                    && !string.Equals(mappedDeviceId, change.DeviceId, StringComparison.OrdinalIgnoreCase))
+                    && !string.Equals(mappedDeviceId, change.DeviceId, StringComparison.OrdinalIgnoreCase);
+                if (selectedTargetIsUpdatedEndpoint || selectedTargetMappingsChangedDevice)
                 {
                     selectedA2dpDeviceId = null;
                     MediaAudioButton.IsEnabled = false;

@@ -220,12 +220,153 @@ public sealed class DiagnosticsExporterTests
         }
     }
 
-    private sealed class StubDeviceService : IBluetoothDeviceService
+    [Fact]
+    [Trait("Category", "Integration")]
+    public async Task Export_redacts_gatt_and_rfcomm_names_but_preserves_diagnostic_metadata()
     {
+        var root = Path.Combine(Path.GetTempPath(), "bthaven-exporter-tests", Guid.NewGuid().ToString("N"));
+        var exportDirectory = Path.Combine(root, "exports");
+        Directory.CreateDirectory(root);
+        const string gattServiceUuid = "gatt-service-sentinel";
+        const string gattCharacteristicUuid = "gatt-characteristic-sentinel";
+        const string gattDescriptorUuid = "gatt-descriptor-sentinel";
+        const string userDescription = "gatt-user-description-sentinel";
+        const string rfcommName = "rfcomm-name-sentinel";
+        var device = new BluetoothDeviceModel
+        {
+            Id = "device-sentinel",
+            Name = "Phone",
+            Transport = BluetoothTransport.LowEnergy,
+            Endpoints =
+            [
+                new BluetoothEndpointReference
+                {
+                    Id = "endpoint-sentinel",
+                    Transport = BluetoothTransport.LowEnergy,
+                },
+            ],
+        };
+        var snapshot = new BluetoothDeviceInspectionSnapshot
+        {
+            DeviceId = device.Id,
+            Name = device.Name,
+            Transport = device.Transport,
+            GattServices =
+            [
+                new BluetoothGattServiceInspection
+                {
+                    Uuid = gattServiceUuid,
+                    AttributeHandle = 17,
+                    Status = "Success",
+                    HResult = "0x80070005",
+                    Characteristics =
+                    [
+                        new BluetoothGattCharacteristicInspection
+                        {
+                            Uuid = gattCharacteristicUuid,
+                            AttributeHandle = 23,
+                            UserDescription = userDescription,
+                            Status = "Success",
+                            HResult = "0x80070006",
+                            Descriptors =
+                            [
+                                new BluetoothGattDescriptorInspection
+                                {
+                                    Uuid = gattDescriptorUuid,
+                                    AttributeHandle = 29,
+                                },
+                            ],
+                        },
+                    ],
+                },
+            ],
+            RfcommServices =
+            [
+                new BluetoothRfcommServiceInspection
+                {
+                    ServiceId = "rfcomm-id-sentinel",
+                    KnownName = rfcommName,
+                    DeviceId = "rfcomm-device-sentinel",
+                    Status = "Success",
+                    HResult = "0x80070007",
+                },
+            ],
+            Diagnostics =
+            [
+                new BluetoothInspectionDiagnostic
+                {
+                    Operation = "inspection.sentinel",
+                    Status = "Failed",
+                    HResult = "0x80070008",
+                    ExceptionType = "SentinelException",
+                    Message = "diagnostic-message-sentinel",
+                },
+            ],
+        };
+        try
+        {
+            var exporter = new DiagnosticsExporter(
+                new StubDeviceService([device]),
+                new StubEndpointService(),
+                NullDiagnosticLogger.Instance,
+                new StubInspector(snapshot),
+                outputDirectory: exportDirectory);
+
+            var path = await exporter.ExportAsync();
+            try
+            {
+                using var archive = ZipFile.OpenRead(path);
+                var jsonEntry = archive.GetEntry("diagnostics.json");
+                Assert.NotNull(jsonEntry);
+                using var reader = new StreamReader(jsonEntry!.Open(), Encoding.UTF8);
+                var json = await reader.ReadToEndAsync();
+
+                foreach (var sentinel in new[]
+                {
+                    gattServiceUuid,
+                    gattCharacteristicUuid,
+                    gattDescriptorUuid,
+                    userDescription,
+                    "rfcomm-id-sentinel",
+                    rfcommName,
+                    "rfcomm-device-sentinel",
+                })
+                {
+                    Assert.DoesNotContain(sentinel, json, StringComparison.Ordinal);
+                }
+
+                Assert.Contains("\"attributeHandle\": 17", json, StringComparison.Ordinal);
+                Assert.Contains("\"status\": \"Success\"", json, StringComparison.Ordinal);
+                Assert.Contains("\"hResult\": \"0x80070005\"", json, StringComparison.Ordinal);
+                Assert.Contains("\"exceptionType\": \"SentinelException\"", json, StringComparison.Ordinal);
+            }
+            finally
+            {
+                File.Delete(path);
+            }
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
+    private sealed class StubInspector(BluetoothDeviceInspectionSnapshot snapshot) : IBluetoothDeviceInspector
+    {
+        public Task<BluetoothDeviceInspectionSnapshot> InspectAsync(
+            BluetoothDeviceModel device,
+            CancellationToken cancellationToken = default)
+            => Task.FromResult(snapshot);
+    }
+
+    private sealed class StubDeviceService(IReadOnlyList<BluetoothDeviceModel>? devices = null) : IBluetoothDeviceService
+    {
+        private readonly IReadOnlyList<BluetoothDeviceModel> devices = devices ?? [];
+
         public Task<IReadOnlyList<BluetoothDeviceModel>> GetDevicesAsync(
             BluetoothDeviceFilter filter = BluetoothDeviceFilter.Connected,
             CancellationToken cancellationToken = default)
-            => Task.FromResult<IReadOnlyList<BluetoothDeviceModel>>([]);
+            => Task.FromResult(devices);
 
         public IAsyncEnumerable<BluetoothDeviceChange> WatchAsync(CancellationToken cancellationToken = default)
             => EmptyChanges();

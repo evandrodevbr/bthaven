@@ -216,6 +216,7 @@ public sealed class GattBatteryProvider : IBatteryProvider, IAsyncDisposable
         Action<BatteryState>? onChanged = null,
         CancellationToken cancellationToken = default)
     {
+        HashSet<GattDeviceService>? unvisitedServices = null;
         ArgumentNullException.ThrowIfNull(device);
         cancellationToken.ThrowIfCancellationRequested();
         logger.Debug("Battery.Gatt.SubscribeStarted", new Dictionary<string, object?>
@@ -279,9 +280,11 @@ public sealed class GattBatteryProvider : IBatteryProvider, IAsyncDisposable
                 });
                 return false;
             }
+            unvisitedServices = new HashSet<GattDeviceService>(servicesResult.Services);
 
             foreach (var service in servicesResult.Services)
             {
+                unvisitedServices.Remove(service);
                 GattSubscriptionCleanup? pendingCleanup = null;
                 var retained = false;
                 try
@@ -373,6 +376,7 @@ public sealed class GattBatteryProvider : IBatteryProvider, IAsyncDisposable
                         ["deviceId"] = device.Id,
                         ["configuration"] = configuration.ToString(),
                     });
+                    DisposeUnvisitedServices(unvisitedServices);
                     return true;
                 }
                 finally
@@ -397,10 +401,26 @@ public sealed class GattBatteryProvider : IBatteryProvider, IAsyncDisposable
         }
         finally
         {
+            DisposeUnvisitedServices(unvisitedServices);
             if (createdSubscription is null)
             {
                 bluetoothDevice.Dispose();
             }
+        }
+    }
+
+    internal static void DisposeUnvisitedServices<T>(ISet<T>? unvisitedServices)
+        where T : IDisposable
+    {
+        if (unvisitedServices is null)
+        {
+            return;
+        }
+
+        foreach (var service in unvisitedServices.ToArray())
+        {
+            unvisitedServices.Remove(service);
+            service.Dispose();
         }
     }
 
