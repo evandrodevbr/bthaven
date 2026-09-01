@@ -141,6 +141,16 @@ public sealed partial class MainPage : Page
             {
                 devices[device.Id] = device;
             }
+            if (selectedDeviceId is not null && !devices.ContainsKey(selectedDeviceId))
+            {
+                selectedDeviceId = null;
+                DeviceList.SelectedItem = null;
+                ClearSelection();
+            }
+            if (activeMediaDeviceId is not null && !devices.ContainsKey(activeMediaDeviceId))
+            {
+                activeMediaDeviceId = null;
+            }
             RefreshRows();
 
             var renderEndpoints = await endpointManager.GetEndpointsAsync(AudioEndpointDirection.Render, lifetime.Token);
@@ -236,6 +246,10 @@ public sealed partial class MainPage : Page
         if (change.Kind == BluetoothDeviceChangeKind.Removed)
         {
             devices.Remove(change.DeviceId);
+            if (string.Equals(activeMediaDeviceId, change.DeviceId, StringComparison.OrdinalIgnoreCase))
+            {
+                activeMediaDeviceId = null;
+            }
             if (string.Equals(selectedDeviceId, change.DeviceId, StringComparison.OrdinalIgnoreCase))
             {
                 selectedDeviceId = null;
@@ -247,11 +261,92 @@ public sealed partial class MainPage : Page
             devices[change.DeviceId] = change.Device;
             if (string.Equals(selectedDeviceId, change.DeviceId, StringComparison.OrdinalIgnoreCase))
             {
+                if (selectedA2dpDeviceId is not null
+                    && !change.Device.Endpoints.Any(endpoint =>
+                        string.Equals(endpoint.Id, selectedA2dpDeviceId, StringComparison.OrdinalIgnoreCase)))
+                {
+                    selectedA2dpDeviceId = null;
+                    MediaAudioButton.IsEnabled = false;
+                    A2dpTargetText.Text = "Alvo A2DP: aguardando nova consulta";
+                }
+                if (selectedHfpTransportId is not null
+                    && !change.Device.Endpoints.Any(endpoint =>
+                        string.Equals(endpoint.Id, selectedHfpTransportId, StringComparison.OrdinalIgnoreCase)))
+                {
+                    selectedHfpTransportId = null;
+                    HfpEnableButton.IsEnabled = false;
+                    HfpTransportText.Text = "Transporte HFP: aguardando nova consulta";
+                }
                 RenderSelection(change.Device);
             }
         }
 
         RefreshRows();
+    }
+
+    private void A2dpService_StateChanged(MediaAudioSinkState state)
+    {
+        if (disposed)
+        {
+            return;
+        }
+
+        var eventDeviceId = a2dpService.DeviceId;
+        var observedServiceState = a2dpService.State;
+        var matchingLogicalIds = state == MediaAudioSinkState.Opened && eventDeviceId is not null
+            ? devices.Values
+                .Where(device => device.Endpoints.Any(endpoint =>
+                    string.Equals(endpoint.Id, eventDeviceId, StringComparison.OrdinalIgnoreCase)))
+                .Select(device => device.Id)
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToArray()
+            : [];
+        var logicalDeviceId = matchingLogicalIds.Length == 1 ? matchingLogicalIds[0] : null;
+
+        logger.Debug("App.A2DP.StateChanged", new Dictionary<string, object?>
+        {
+            ["state"] = state.ToString(),
+            ["deviceId"] = eventDeviceId,
+            ["logicalDeviceId"] = logicalDeviceId,
+        });
+
+        void ApplyState()
+        {
+            if (disposed || a2dpService.State != observedServiceState)
+            {
+                return;
+            }
+
+            if (state == MediaAudioSinkState.Opened)
+            {
+                if (logicalDeviceId is null || eventDeviceId is null)
+                {
+                    logger.Warning("App.A2DP.StateChange.Unresolved", new Dictionary<string, object?>
+                    {
+                        ["deviceId"] = eventDeviceId,
+                        ["matchingLogicalCount"] = matchingLogicalIds.Length,
+                    });
+                    return;
+                }
+
+                activeMediaDeviceId = logicalDeviceId;
+            }
+            else if (state is MediaAudioSinkState.Disabled or MediaAudioSinkState.Failed)
+            {
+                activeMediaDeviceId = null;
+            }
+
+            RefreshRows();
+        }
+
+        if (!DispatcherQueue.TryEnqueue(ApplyState))
+        {
+            logger.Warning("App.A2DP.StateChange.NotApplied", new Dictionary<string, object?>
+            {
+                ["state"] = state.ToString(),
+                ["reason"] = "DispatcherQueue was unavailable",
+            });
+        }
     }
 
     private void RefreshRows()
@@ -345,38 +440,48 @@ public sealed partial class MainPage : Page
                 ? "Nenhum alvo A2DP confirmado"
                 : "Ativar áudio do smartphone";
 
-            var hfpTargets = await hfpService.GetAvailableDevicesAsync(lifetime.Token);
-            var matchingHfpTargets = hfpTargets.Where(target => MatchesDevice(device, target)).ToArray();
-            selectedHfpTransportId = matchingHfpTargets.Length == 1 ? matchingHfpTargets[0].Id : null;
-            HfpEnableButton.IsEnabled = true;
-            HfpEnableButton.Content = selectedHfpTransportId is null
-                ? "Reconsultar transporte HFP"
-                : "Solicitar acesso HFP";
-            HfpTransportText.Text = matchingHfpTargets.Length switch
+            IReadOnlyList<PhoneLineTransportModel> hfpTargets = [];
+            var matchingHfpTargets = Array.Empty<PhoneLineTransportModel>();
+            if (device.Category == BluetoothDeviceCategory.Smartphone)
             {
-                1 => $"Transporte HFP confirmado: {matchingHfpTargets[0].AudioRoutingStatus}",
-                > 1 => $"Transportes HFP ambíguos: {matchingHfpTargets.Length}; ação não iniciada.",
-                _ => "Nenhum PhoneLineTransportDevice correspondeu a este dispositivo.",
-            };
-            HfpStatusInfoBar.Severity = selectedHfpTransportId is null
-                ? InfoBarSeverity.Warning
-                : InfoBarSeverity.Informational;
-            HfpStatusInfoBar.Title = selectedHfpTransportId is null
-                ? "HFP não exposto para este dispositivo"
-                : "HFP disponível para teste";
-            HfpStatusInfoBar.Message = selectedHfpTransportId is null
-                ? "Clique em Reconsultar transporte HFP para executar a descoberta real."
-                : "Clique em Solicitar acesso HFP para pedir a permissão documentada ao Windows.";
-            logger.Info("App.DeviceCapabilities.Completed", new Dictionary<string, object?>
+                hfpTargets = await hfpService.GetAvailableDevicesAsync(lifetime.Token);
+                if (selectedDeviceId is null || !string.Equals(selectedDeviceId, device.Id, StringComparison.OrdinalIgnoreCase))
+                {
+                    return;
+                }
+                matchingHfpTargets = hfpTargets.Where(target => MatchesDevice(device, target)).ToArray();
+                selectedHfpTransportId = matchingHfpTargets.Length == 1 ? matchingHfpTargets[0].Id : null;
+                HfpEnableButton.IsEnabled = true;
+                HfpEnableButton.Content = selectedHfpTransportId is null
+                    ? "Reconsultar transporte HFP"
+                    : "Solicitar acesso HFP";
+                HfpTransportText.Text = matchingHfpTargets.Length switch
+                {
+                    1 => $"Transporte HFP confirmado: {matchingHfpTargets[0].AudioRoutingStatus}",
+                    > 1 => $"Transportes HFP ambíguos: {matchingHfpTargets.Length}; ação não iniciada.",
+                    _ => "Nenhum PhoneLineTransportDevice correspondeu a este dispositivo.",
+                };
+                HfpStatusInfoBar.Severity = selectedHfpTransportId is null
+                    ? InfoBarSeverity.Warning
+                    : InfoBarSeverity.Informational;
+                HfpStatusInfoBar.Title = selectedHfpTransportId is null
+                    ? "HFP não exposto para este smartphone"
+                    : "HFP disponível para teste";
+                HfpStatusInfoBar.Message = selectedHfpTransportId is null
+                    ? "Clique em Reconsultar transporte HFP para executar a descoberta real."
+                    : "Clique em Solicitar acesso HFP para pedir a permissão documentada ao Windows.";
+            }
+            else
             {
-                ["deviceId"] = device.Id,
-                ["batterySource"] = battery.Source,
-                ["batteryPercentage"] = battery.Percentage,
-                ["a2dpCandidates"] = audioTargets.Count,
-                ["a2dpMatches"] = matchingTargets.Length,
-                ["hfpCandidates"] = hfpTargets.Count,
-                ["hfpMatches"] = matchingHfpTargets.Length,
-            });
+                selectedHfpTransportId = null;
+                HfpEnableButton.IsEnabled = false;
+                HfpEnableButton.Content = "HFP disponível apenas para smartphones";
+                HfpTransportText.Text = "Transporte HFP: não aplicável a esta categoria";
+                HfpStatusInfoBar.Severity = InfoBarSeverity.Informational;
+                HfpStatusInfoBar.Title = "HFP não aplicável";
+                HfpStatusInfoBar.Message = "A ativação HFP só é suportada para dispositivos classificados como smartphone.";
+            }
+
         }
         catch (OperationCanceledException) when (lifetime.IsCancellationRequested)
         {
@@ -534,13 +639,20 @@ public sealed partial class MainPage : Page
             return;
         }
 
+        var requestedDeviceId = selectedDeviceId;
+        var requestedA2dpDeviceId = selectedA2dpDeviceId;
         MediaAudioButton.IsEnabled = false;
         try
         {
-            var connected = await a2dpService.ConnectAsync(selectedA2dpDeviceId, lifetime.Token);
+            var connected = await a2dpService.ConnectAsync(requestedA2dpDeviceId, lifetime.Token);
             if (connected && AutoReconnectCheckBox.IsChecked == true)
             {
-                await autoReconnectService.EnableAsync(selectedA2dpDeviceId, lifetime.Token);
+                await autoReconnectService.EnableAsync(requestedA2dpDeviceId, lifetime.Token);
+            }
+            if (connected && requestedDeviceId is not null && devices.ContainsKey(requestedDeviceId))
+            {
+                activeMediaDeviceId = requestedDeviceId;
+                RefreshRows();
             }
             var endpoint = OutputEndpointComboBox.SelectedItem as AudioEndpointModel;
             logger.Info("App.MediaAudioButton.Completed", new Dictionary<string, object?>
@@ -617,6 +729,18 @@ public sealed partial class MainPage : Page
                 HfpStatusInfoBar.Severity = InfoBarSeverity.Warning;
                 HfpStatusInfoBar.Title = "Selecione um smartphone";
                 HfpStatusInfoBar.Message = "Nenhum dispositivo foi selecionado para o teste HFP.";
+                return;
+            }
+            if (device.Category != BluetoothDeviceCategory.Smartphone)
+            {
+                HfpStatusInfoBar.Severity = InfoBarSeverity.Informational;
+                HfpStatusInfoBar.Title = "HFP não aplicável";
+                HfpStatusInfoBar.Message = "A ativação HFP só é suportada para dispositivos classificados como smartphone.";
+                logger.Info("App.HFP.Enable.NotApplicable", new Dictionary<string, object?>
+                {
+                    ["deviceId"] = device.Id,
+                    ["category"] = device.Category.ToString(),
+                });
                 return;
             }
 
@@ -788,6 +912,13 @@ public sealed partial class MainPage : Page
 
     private static bool MatchesDevice(BluetoothDeviceModel device, PhoneLineTransportModel target)
     {
+        if (device.Endpoints.Any(endpoint =>
+                string.Equals(endpoint.Id, target.Id, StringComparison.OrdinalIgnoreCase)
+                || string.Equals(endpoint.Id, target.DeviceId, StringComparison.OrdinalIgnoreCase)))
+        {
+            return true;
+        }
+
         var address = NormalizeAddress(device.Address);
         if (!string.IsNullOrWhiteSpace(address)
             && (NormalizeAddress(target.Id).Contains(address, StringComparison.OrdinalIgnoreCase)
