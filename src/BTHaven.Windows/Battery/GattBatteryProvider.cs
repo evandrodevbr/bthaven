@@ -114,30 +114,33 @@ public sealed class GattBatteryProvider : IBatteryProvider, IAsyncDisposable
             ["endpointId"] = endpoint.Id,
             ["transport"] = endpoint.Transport.ToString(),
         });
-        var bluetoothDevice = await BluetoothLEDevice.FromIdAsync(endpoint.Id);
-        if (bluetoothDevice is null)
-        {
-            logger.Info("Battery.Gatt.Unavailable", new Dictionary<string, object?>
-            {
-                ["deviceId"] = device.Id,
-                ["endpointId"] = endpoint.Id,
-                ["reason"] = "BluetoothLEDevice.FromIdAsync returned null",
-            });
-            return BatteryState.Unavailable(Name);
-        }
-
+        BluetoothLEDevice? bluetoothDevice = null;
+        IReadOnlyList<GattDeviceService>? services = null;
         try
         {
+            bluetoothDevice = await BluetoothLEDevice.FromIdAsync(endpoint.Id);
+            if (bluetoothDevice is null)
+            {
+                logger.Info("Battery.Gatt.Unavailable", new Dictionary<string, object?>
+                {
+                    ["deviceId"] = device.Id,
+                    ["endpointId"] = endpoint.Id,
+                    ["reason"] = "BluetoothLEDevice.FromIdAsync returned null",
+                });
+                return BatteryState.Unavailable(Name);
+            }
+
             var servicesResult = await bluetoothDevice.GetGattServicesForUuidAsync(
                 GattServiceUuids.Battery,
                 BluetoothCacheMode.Uncached);
+            services = servicesResult.Services;
             logger.Debug("Battery.Gatt.ServiceQuery", new Dictionary<string, object?>
             {
                 ["deviceId"] = device.Id,
                 ["status"] = servicesResult.Status.ToString(),
-                ["count"] = servicesResult.Services.Count,
+                ["count"] = services.Count,
             });
-            if (servicesResult.Status != GattCommunicationStatus.Success || servicesResult.Services.Count == 0)
+            if (servicesResult.Status != GattCommunicationStatus.Success || services.Count == 0)
             {
                 logger.Info("Battery.Gatt.Unavailable", new Dictionary<string, object?>
                 {
@@ -148,7 +151,7 @@ public sealed class GattBatteryProvider : IBatteryProvider, IAsyncDisposable
                 return BatteryState.Unavailable(Name);
             }
 
-            foreach (var service in servicesResult.Services)
+            foreach (var service in services)
             {
                 var characteristicsResult = await service.GetCharacteristicsForUuidAsync(
                     GattCharacteristicUuids.BatteryLevel,
@@ -196,7 +199,15 @@ public sealed class GattBatteryProvider : IBatteryProvider, IAsyncDisposable
         }
         finally
         {
-            bluetoothDevice.Dispose();
+            if (services is not null)
+            {
+                foreach (var service in services)
+                {
+                    service.Dispose();
+                }
+            }
+
+            bluetoothDevice?.Dispose();
         }
     }
 

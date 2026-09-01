@@ -15,6 +15,7 @@ public sealed partial class BluetoothDeviceInspector
         CancellationToken cancellationToken)
     {
         BluetoothLEDevice? bluetoothDevice = null;
+        HashSet<GattDeviceService>? unvisitedServices = null;
         try
         {
             cancellationToken.ThrowIfCancellationRequested();
@@ -79,9 +80,15 @@ public sealed partial class BluetoothDeviceInspector
             {
                 return;
             }
+            unvisitedServices = new HashSet<GattDeviceService>();
+            foreach (var service in servicesResult.Services)
+            {
+                unvisitedServices.Add(service);
+            }
 
             foreach (var service in servicesResult.Services)
             {
+                unvisitedServices.Remove(service);
                 var serviceStatus = "Unknown";
                 string? serviceHResult = null;
                 string? serviceMessage = null;
@@ -153,6 +160,14 @@ public sealed partial class BluetoothDeviceInspector
         }
         finally
         {
+            if (unvisitedServices is not null)
+            {
+                foreach (var service in unvisitedServices)
+                {
+                    service.Dispose();
+                }
+            }
+
             bluetoothDevice?.Dispose();
         }
     }

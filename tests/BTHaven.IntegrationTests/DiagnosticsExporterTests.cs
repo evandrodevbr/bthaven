@@ -138,6 +138,88 @@ public sealed class DiagnosticsExporterTests
         }
     }
 
+    [Fact]
+    [Trait("Category", "Integration")]
+    public async Task Export_and_read_redact_endpoint_identity_fields_but_keep_exception_metadata()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "bthaven-exporter-tests", Guid.NewGuid().ToString("N"));
+        var exportDirectory = Path.Combine(root, "exports");
+        var logDirectory = Path.Combine(root, "logs");
+        Directory.CreateDirectory(root);
+        var rawValues = new[]
+        {
+            "raw-id",
+            "raw-logical-key",
+            "raw-logical-device-id",
+            "raw-selector",
+            "raw-endpoint-id",
+            "raw-ble-id",
+            "raw-transport-device-id",
+            "raw-a2dp-device-id",
+            "raw-device-instance-id",
+        };
+        try
+        {
+            var logger = new TraceDiagnosticLogger(logDirectory);
+            logger.Info("Test.SensitiveEndpointFields", new Dictionary<string, object?>
+            {
+                ["id"] = rawValues[0],
+                ["logicalKey"] = rawValues[1],
+                ["logicalDeviceId"] = rawValues[2],
+                ["selector"] = rawValues[3],
+                ["endpointId"] = rawValues[4],
+                ["bleId"] = rawValues[5],
+                ["transportDeviceId"] = rawValues[6],
+                ["a2dpDeviceId"] = rawValues[7],
+                ["deviceInstanceId"] = rawValues[8],
+                ["exceptionType"] = "InvalidOperationException",
+                ["hResult"] = "0x80070005",
+            });
+
+            var readLine = Assert.Single(
+                logger.ReadRecent(100, redactSensitive: true),
+                line => line.Contains("Test.SensitiveEndpointFields", StringComparison.Ordinal));
+            foreach (var rawValue in rawValues)
+            {
+                Assert.DoesNotContain(rawValue, readLine, StringComparison.Ordinal);
+            }
+
+            Assert.Contains("InvalidOperationException", readLine, StringComparison.Ordinal);
+            Assert.Contains("0x80070005", readLine, StringComparison.Ordinal);
+
+            var exporter = new DiagnosticsExporter(
+                new StubDeviceService(),
+                new StubEndpointService(),
+                logger,
+                outputDirectory: exportDirectory);
+            var path = await exporter.ExportAsync();
+            try
+            {
+                using var archive = ZipFile.OpenRead(path);
+                var logsEntry = archive.GetEntry("logs.jsonl");
+                Assert.NotNull(logsEntry);
+                using var reader = new StreamReader(logsEntry!.Open(), Encoding.UTF8);
+                var logs = await reader.ReadToEndAsync();
+
+                foreach (var rawValue in rawValues)
+                {
+                    Assert.DoesNotContain(rawValue, logs, StringComparison.Ordinal);
+                }
+
+                Assert.Contains("InvalidOperationException", logs, StringComparison.Ordinal);
+                Assert.Contains("0x80070005", logs, StringComparison.Ordinal);
+            }
+            finally
+            {
+                File.Delete(path);
+            }
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
     private sealed class StubDeviceService : IBluetoothDeviceService
     {
         public Task<IReadOnlyList<BluetoothDeviceModel>> GetDevicesAsync(

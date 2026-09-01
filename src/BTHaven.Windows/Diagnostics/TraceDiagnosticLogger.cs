@@ -484,7 +484,12 @@ public sealed class TraceDiagnosticLogger : IWindowsDiagnosticLogger
             .ToLowerInvariant();
         return compact is "id" or "deviceid" or "containerid" or "address" or "name"
             or "friendlyname" or "manufacturer" or "model" or "path" or "process"
-            or "commandline" or "username" or "user" or "message" or "stacktrace";
+            or "commandline" or "username" or "user" or "message" or "stacktrace"
+            or "logicalkey" or "selector"
+            || compact.EndsWith("id", StringComparison.Ordinal)
+            || compact.EndsWith("selector", StringComparison.Ordinal)
+            || (compact.StartsWith("logical", StringComparison.Ordinal)
+                && compact.EndsWith("key", StringComparison.Ordinal));
     }
 
     private static string RedactIdentifier(string? value)
