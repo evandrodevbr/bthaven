@@ -505,7 +505,7 @@ public sealed partial class MainPage : Page
             {
                 return;
             }
-            var matchingTargets = audioTargets.Where(target => MatchesDevice(device, target)).ToArray();
+            var matchingTargets = BluetoothDeviceCorrelation.FindMatches(device, audioTargets);
             if (matchingTargets.Length == 1 && !string.IsNullOrWhiteSpace(matchingTargets[0].Id))
             {
                 a2dpLogicalDeviceIds[matchingTargets[0].Id] = device.Id;
@@ -531,7 +531,7 @@ public sealed partial class MainPage : Page
                 {
                     return;
                 }
-                matchingHfpTargets = hfpTargets.Where(target => MatchesDevice(device, target)).ToArray();
+                matchingHfpTargets = BluetoothDeviceCorrelation.FindMatches(device, hfpTargets);
                 selectedHfpTransportId = matchingHfpTargets.Length == 1 ? matchingHfpTargets[0].Id : null;
                 HfpEnableButton.IsEnabled = true;
                 HfpEnableButton.Content = selectedHfpTransportId is null
@@ -854,7 +854,7 @@ public sealed partial class MainPage : Page
             if (selectedHfpTransportId is null)
             {
                 var targets = await hfpService.GetAvailableDevicesAsync(lifetime.Token);
-                var matches = targets.Where(target => MatchesDevice(device, target)).ToArray();
+                var matches = BluetoothDeviceCorrelation.FindMatches(device, targets);
                 selectedHfpTransportId = matches.Length == 1 ? matches[0].Id : null;
             }
 
@@ -1051,62 +1051,6 @@ public sealed partial class MainPage : Page
         RenderRemoteVolumeStatus(snapshot.RemoteVolume);
     }
 
-    private static bool MatchesDevice(BluetoothDeviceModel device, RemoteAudioDeviceInfo target)
-    {
-        if (!string.IsNullOrWhiteSpace(target.Id)
-            && device.Endpoints.Any(endpoint =>
-                string.Equals(endpoint.Id, target.Id, StringComparison.OrdinalIgnoreCase)))
-        {
-            return true;
-        }
-
-        if (!string.IsNullOrWhiteSpace(device.ContainerId)
-            && !string.IsNullOrWhiteSpace(target.ContainerId)
-            && string.Equals(device.ContainerId, target.ContainerId, StringComparison.OrdinalIgnoreCase))
-        {
-            return true;
-        }
-
-        var address = NormalizeAddress(device.Address);
-        if (!string.IsNullOrWhiteSpace(address))
-        {
-            var targetAddress = NormalizeAddress(target.Address);
-            if (string.Equals(address, targetAddress, StringComparison.OrdinalIgnoreCase)
-                || NormalizeAddress(target.Id).Contains(address, StringComparison.OrdinalIgnoreCase))
-            {
-                return true;
-            }
-        }
-
-        return string.Equals(device.Name, target.Name, StringComparison.OrdinalIgnoreCase);
-    }
-
-    private static bool MatchesDevice(BluetoothDeviceModel device, PhoneLineTransportModel target)
-    {
-        if (device.Endpoints.Any(endpoint =>
-                string.Equals(endpoint.Id, target.Id, StringComparison.OrdinalIgnoreCase)
-                || string.Equals(endpoint.Id, target.DeviceId, StringComparison.OrdinalIgnoreCase)))
-        {
-            return true;
-        }
-
-        var address = NormalizeAddress(device.Address);
-        if (!string.IsNullOrWhiteSpace(address)
-            && (NormalizeAddress(target.Id).Contains(address, StringComparison.OrdinalIgnoreCase)
-                || NormalizeAddress(target.DeviceId).Contains(address, StringComparison.OrdinalIgnoreCase)))
-        {
-            return true;
-        }
-
-        return string.Equals(device.Name, target.Name, StringComparison.OrdinalIgnoreCase);
-    }
-
-    private static string NormalizeAddress(string? value)
-    {
-        return string.IsNullOrWhiteSpace(value)
-            ? string.Empty
-            : new string(value.Where(char.IsLetterOrDigit).ToArray()).ToUpperInvariant();
-    }
 
     private static string FormatCapabilities(BluetoothDeviceModel device)
     {

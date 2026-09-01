@@ -465,7 +465,7 @@ public sealed partial class BluetoothDeviceInspector : IBluetoothDeviceInspector
             try
             {
                 var targets = await a2dpService.GetAvailableDevicesAsync(cancellationToken).ConfigureAwait(false);
-                var matches = targets.Where(target => MatchesDevice(device, target)).ToArray();
+                var matches = BluetoothDeviceCorrelation.FindMatches(device, targets);
                 var status = matches.Length == 1 ? "Available" : matches.Length == 0 ? "NotAvailable" : "Ambiguous";
                 observations.Add(new BluetoothProfileObservation
                 {
@@ -510,7 +510,7 @@ public sealed partial class BluetoothDeviceInspector : IBluetoothDeviceInspector
             try
             {
                 var targets = await hfpService.GetAvailableDevicesAsync(cancellationToken).ConfigureAwait(false);
-                var matches = targets.Where(target => MatchesDevice(device, target)).ToArray();
+                var matches = BluetoothDeviceCorrelation.FindMatches(device, targets);
                 var status = matches.Length == 1 ? "Discovered" : matches.Length == 0 ? "NotAvailable" : "Ambiguous";
                 observations.Add(new BluetoothProfileObservation
                 {
@@ -628,41 +628,6 @@ public sealed partial class BluetoothDeviceInspector : IBluetoothDeviceInspector
     }
 
 
-    private static bool MatchesDevice(BluetoothDeviceModel device, RemoteAudioDeviceInfo target)
-    {
-        if (!string.IsNullOrWhiteSpace(device.ContainerId)
-            && !string.IsNullOrWhiteSpace(target.ContainerId)
-            && string.Equals(device.ContainerId, target.ContainerId, StringComparison.OrdinalIgnoreCase))
-        {
-            return true;
-        }
-
-        var address = NormalizeAddress(device.Address);
-        if (!string.IsNullOrWhiteSpace(address))
-        {
-            var targetAddress = NormalizeAddress(target.Address);
-            if (string.Equals(address, targetAddress, StringComparison.OrdinalIgnoreCase)
-                || NormalizeAddress(target.Id).Contains(address, StringComparison.OrdinalIgnoreCase))
-            {
-                return true;
-            }
-        }
-
-        return string.Equals(device.Name, target.Name, StringComparison.OrdinalIgnoreCase);
-    }
-
-    private static bool MatchesDevice(BluetoothDeviceModel device, PhoneLineTransportModel target)
-    {
-        var address = NormalizeAddress(device.Address);
-        if (!string.IsNullOrWhiteSpace(address)
-            && (NormalizeAddress(target.Id).Contains(address, StringComparison.OrdinalIgnoreCase)
-                || NormalizeAddress(target.DeviceId).Contains(address, StringComparison.OrdinalIgnoreCase)))
-        {
-            return true;
-        }
-
-        return string.Equals(device.Name, target.Name, StringComparison.OrdinalIgnoreCase);
-    }
 
     private static AssociationEndpoint CreateAssociationEndpoint(
         DeviceInformation info,
@@ -780,12 +745,6 @@ public sealed partial class BluetoothDeviceInspector : IBluetoothDeviceInspector
         return address == 0 ? null : address.ToString("X12");
     }
 
-    private static string NormalizeAddress(string? value)
-    {
-        return string.IsNullOrWhiteSpace(value)
-            ? string.Empty
-            : new string(value.Where(char.IsLetterOrDigit).ToArray()).ToUpperInvariant();
-    }
 
 
     private static int? SelectRssi(IEnumerable<int?> values)

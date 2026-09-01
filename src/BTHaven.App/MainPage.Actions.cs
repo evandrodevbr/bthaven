@@ -82,7 +82,7 @@ public sealed partial class MainPage
             if (toggle.IsOn)
             {
                 var targets = await a2dpService.GetAvailableDevicesAsync(lifetime.Token);
-                var matches = targets.Where(target => MatchesDevice(device, target)).ToArray();
+                var matches = BluetoothDeviceCorrelation.FindMatches(device, targets);
                 if (matches.Length != 1)
                 {
                     SetMediaToggleState(toggle, false);
