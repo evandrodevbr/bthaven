@@ -1,6 +1,7 @@
 using BTHaven.Core.Audio;
 using BTHaven.Core.Devices;
 using BTHaven.Windows.Audio;
+using BTHaven.Windows.Bluetooth;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 
