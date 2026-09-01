@@ -7,13 +7,14 @@ public sealed class BluetoothDeviceManagerSmokeTests
 {
     [Fact]
     [Trait("Category", "Integration")]
+    [Trait("RequiresHardware", "Bluetooth")]
     public async Task Manager_returns_a_unique_snapshot_from_the_live_watcher()
     {
         await using var manager = new BluetoothDeviceManager();
 
         var devices = await manager.GetDevicesAsync(BluetoothDeviceFilter.All);
+        Assert.True(devices.Count > 0, "Paired Bluetooth hardware device required.");
 
-        Assert.NotNull(devices);
         Assert.Equal(devices.Count, devices.Select(device => device.Id).Distinct(StringComparer.OrdinalIgnoreCase).Count());
         Assert.All(devices, device => Assert.False(string.IsNullOrWhiteSpace(device.Id)));
     }

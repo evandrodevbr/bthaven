@@ -8,18 +8,19 @@ public sealed class BluetoothDeviceInspectorTests
 {
     [Fact]
     [Trait("Category", "Integration")]
+    [Trait("RequiresHardware", "Bluetooth")]
     public async Task Inspects_a_real_paired_device_without_returning_winrt_objects()
     {
         await using var manager = new BluetoothDeviceManager(NullDiagnosticLogger.Instance);
         var devices = await manager.GetDevicesAsync(BluetoothDeviceFilter.All);
-        Assert.NotEmpty(devices);
+        Assert.True(devices.Count > 0, "Paired Bluetooth hardware device required.");
 
         var inspector = new BluetoothDeviceInspector(NullDiagnosticLogger.Instance);
         var snapshot = await inspector.InspectAsync(devices[0]);
 
         Assert.Equal(devices[0].Id, snapshot.DeviceId);
         Assert.Equal(devices[0].Name, snapshot.Name);
-        Assert.NotEmpty(snapshot.Endpoints);
+        Assert.True(snapshot.Endpoints.Count > 0, "Inspectable Bluetooth hardware endpoint required.");
         Assert.NotNull(snapshot.Diagnostics);
     }
 
@@ -30,14 +31,20 @@ public sealed class BluetoothDeviceInspectorTests
     {
         await using var manager = new BluetoothDeviceManager(NullDiagnosticLogger.Instance);
         var devices = await manager.GetDevicesAsync(BluetoothDeviceFilter.All);
-        Assert.NotEmpty(devices);
+        Assert.True(devices.Count > 0, "Paired Bluetooth hardware device required.");
+
+        var device = devices.FirstOrDefault(candidate =>
+            candidate.Transport == BluetoothTransport.DualMode && candidate.IsConnected);
+        Assert.True(
+            device is not null,
+            "Connected dual-mode Bluetooth hardware phone required.");
 
         var snapshot = await new BluetoothDeviceInspector(NullDiagnosticLogger.Instance)
-            .InspectAsync(devices[0]);
+            .InspectAsync(device!);
 
         Assert.Contains(snapshot.Endpoints, endpoint => endpoint.Transport == BluetoothTransport.Classic);
         Assert.Contains(snapshot.Endpoints, endpoint => endpoint.Transport == BluetoothTransport.LowEnergy);
-        Assert.Equal(devices[0].IsPaired, snapshot.IsPaired);
-        Assert.Equal(devices[0].IsPresent, snapshot.IsPresent);
+        Assert.Equal(device!.IsPaired, snapshot.IsPaired);
+        Assert.Equal(device.IsPresent, snapshot.IsPresent);
     }
 }

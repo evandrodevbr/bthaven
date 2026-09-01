@@ -26,7 +26,6 @@ public sealed class A2dpAutoReconnectService : IAsyncDisposable
     private readonly TimeSpan stateChangeTimeout;
     private CancellationTokenSource? cancellation;
     private Task? loop;
-    private string? targetId;
 
     public A2dpAutoReconnectService(
         A2dpSinkService sink,
@@ -75,7 +74,6 @@ public sealed class A2dpAutoReconnectService : IAsyncDisposable
         lock (sync)
         {
             cancellation = source;
-            targetId = requestedDeviceId;
             loop = RunAsync(requestedDeviceId, source.Token);
         }
         logger.Info("A2DP.AutoReconnect.Enabled", new Dictionary<string, object?>
@@ -95,7 +93,6 @@ public sealed class A2dpAutoReconnectService : IAsyncDisposable
             running = loop;
             cancellation = null;
             loop = null;
-            targetId = null;
         }
 
         if (source is null)
