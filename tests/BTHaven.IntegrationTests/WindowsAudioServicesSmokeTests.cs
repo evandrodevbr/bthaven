@@ -38,10 +38,7 @@ public sealed class WindowsAudioServicesSmokeTests
     {
         await using var service = new A2dpSinkService();
         var targets = await service.GetAvailableDevicesAsync();
-        if (targets.Count == 0)
-        {
-            return;
-        }
+        Assert.NotEmpty(targets);
 
         var opened = await service.ConnectAsync(targets[0].Id);
         try

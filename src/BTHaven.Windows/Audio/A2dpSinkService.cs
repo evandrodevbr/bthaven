@@ -21,15 +21,28 @@ public sealed class A2dpSinkService : IMediaAudioSink, IAsyncDisposable
     ];
 
     private readonly object sync = new();
+    private readonly SemaphoreSlim lifecycleGate = new(1, 1);
     private readonly IWindowsDiagnosticLogger logger;
-    private AudioPlaybackConnection? connection;
+    private readonly Func<string, IA2dpConnection?> connectionFactory;
+    private IA2dpConnection? connection;
+    private Action<IA2dpConnection>? connectionStateChanged;
     private string? deviceId;
+    private long generation;
     private MediaAudioSinkState state = MediaAudioSinkState.Disabled;
 
     public event Action<MediaAudioSinkState>? StateChanged;
 
     public A2dpSinkService(IWindowsDiagnosticLogger? logger = null)
+        : this(A2dpConnectionAdapters.TryCreate, logger)
     {
+    }
+
+    internal A2dpSinkService(
+        Func<string, IA2dpConnection?> connectionFactory,
+        IWindowsDiagnosticLogger? logger = null)
+    {
+        ArgumentNullException.ThrowIfNull(connectionFactory);
+        this.connectionFactory = connectionFactory;
         this.logger = logger ?? NullDiagnosticLogger.Instance;
     }
 
@@ -131,16 +144,22 @@ public sealed class A2dpSinkService : IMediaAudioSink, IAsyncDisposable
         {
             ["deviceId"] = requestedDeviceId,
         });
-        await DisconnectAsync(cancellationToken).ConfigureAwait(false);
-        SetState(MediaAudioSinkState.Starting, requestedDeviceId);
 
-        AudioPlaybackConnection? newConnection = null;
+        await lifecycleGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        IA2dpConnection? candidate = null;
+        Action<IA2dpConnection>? candidateStateChanged = null;
+        var candidateGeneration = 0L;
         try
         {
-            newConnection = AudioPlaybackConnection.TryCreateFromId(requestedDeviceId);
-            if (newConnection is null)
+            DisconnectCurrent();
+            lock (sync)
             {
-                SetState(MediaAudioSinkState.Failed, requestedDeviceId);
+                candidateGeneration = ++generation;
+            }
+            candidate = connectionFactory(requestedDeviceId);
+            if (candidate is null)
+            {
+                SetState(MediaAudioSinkState.Failed, null);
                 logger.Warning("A2DP.Connection.Unavailable", new Dictionary<string, object?>
                 {
                     ["deviceId"] = requestedDeviceId,
@@ -149,47 +168,69 @@ public sealed class A2dpSinkService : IMediaAudioSink, IAsyncDisposable
                 return false;
             }
 
-            newConnection.StateChanged += OnStateChanged;
+            candidateStateChanged = sender => OnStateChanged(sender, candidateGeneration);
+            lock (sync)
+            {
+                connection = candidate;
+                connectionStateChanged = candidateStateChanged;
+            }
+            candidate.StateChanged += candidateStateChanged;
+            SetState(MediaAudioSinkState.Starting, requestedDeviceId);
             logger.Debug("A2DP.Connection.Starting", new Dictionary<string, object?>
             {
                 ["deviceId"] = requestedDeviceId,
-                ["state"] = newConnection.State.ToString(),
+                ["state"] = candidate.State.ToString(),
             });
-            await newConnection.StartAsync();
+            await candidate.StartAsync().ConfigureAwait(false);
             SetState(MediaAudioSinkState.Started, requestedDeviceId);
             SetState(MediaAudioSinkState.Opening, requestedDeviceId);
-            var openResult = await newConnection.OpenAsync();
+            var openStatus = await candidate.OpenAsync().ConfigureAwait(false);
             logger.Info("A2DP.Connection.OpenResult", new Dictionary<string, object?>
             {
                 ["deviceId"] = requestedDeviceId,
-                ["status"] = openResult.Status.ToString(),
-                ["state"] = newConnection.State.ToString(),
+                ["status"] = openStatus.ToString(),
+                ["state"] = candidate.State.ToString(),
             });
             cancellationToken.ThrowIfCancellationRequested();
-            if (openResult.Status != AudioPlaybackConnectionOpenResultStatus.Success)
+            if (openStatus != AudioPlaybackConnectionOpenResultStatus.Success)
             {
-                SetState(MediaAudioSinkState.Failed, requestedDeviceId);
+                SetState(MediaAudioSinkState.Failed, null);
+                return false;
+            }
+
+            if (candidate.State == AudioPlaybackConnectionState.Closed)
+            {
+                SetState(MediaAudioSinkState.Disabled, null);
                 return false;
             }
 
             lock (sync)
             {
-                connection = newConnection;
-                deviceId = requestedDeviceId;
+                if (!ReferenceEquals(connection, candidate) || generation != candidateGeneration)
+                {
+                    return false;
+                }
+
                 state = MediaAudioSinkState.Opened;
+                deviceId = requestedDeviceId;
             }
             logger.Info("A2DP.Connection.Opened", new Dictionary<string, object?>
             {
                 ["deviceId"] = requestedDeviceId,
-                ["state"] = newConnection.State.ToString(),
+                ["state"] = candidate.State.ToString(),
                 ["audioPath"] = "Windows system playback endpoint",
             });
-            newConnection = null;
+            StateChanged?.Invoke(MediaAudioSinkState.Opened);
+            candidate = null;
+            candidateStateChanged = null;
             return true;
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
-            SetState(MediaAudioSinkState.Failed, requestedDeviceId);
+            if (candidate is null || IsCurrent(candidate, candidateGeneration))
+            {
+                SetState(MediaAudioSinkState.Failed, null);
+            }
             logger.Info("A2DP.Connection.Cancelled", new Dictionary<string, object?>
             {
                 ["deviceId"] = requestedDeviceId,
@@ -198,7 +239,10 @@ public sealed class A2dpSinkService : IMediaAudioSink, IAsyncDisposable
         }
         catch (Exception exception)
         {
-            SetState(MediaAudioSinkState.Failed, requestedDeviceId);
+            if (candidate is null || IsCurrent(candidate, candidateGeneration))
+            {
+                SetState(MediaAudioSinkState.Failed, null);
+            }
             logger.Error("A2DP.Connection.Failed", exception, new Dictionary<string, object?>
             {
                 ["deviceId"] = requestedDeviceId,
@@ -207,36 +251,42 @@ public sealed class A2dpSinkService : IMediaAudioSink, IAsyncDisposable
         }
         finally
         {
-            newConnection?.Dispose();
+            if (candidate is not null)
+            {
+                if (candidateStateChanged is not null)
+                {
+                    candidate.StateChanged -= candidateStateChanged;
+                }
+
+                lock (sync)
+                {
+                    if (ReferenceEquals(connection, candidate)
+                        && generation == candidateGeneration)
+                    {
+                        connection = null;
+                        connectionStateChanged = null;
+                        deviceId = null;
+                    }
+                }
+                candidate.Dispose();
+            }
+
+            lifecycleGate.Release();
         }
     }
 
     public async Task DisconnectAsync(CancellationToken cancellationToken = default)
     {
         cancellationToken.ThrowIfCancellationRequested();
-        string? oldDeviceId;
-        AudioPlaybackConnection? oldConnection;
-        lock (sync)
+        await lifecycleGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
         {
-            oldConnection = connection;
-            oldDeviceId = deviceId;
-            connection = null;
-            deviceId = null;
-            state = MediaAudioSinkState.Disabled;
+            DisconnectCurrent();
         }
-
-        if (oldConnection is null)
+        finally
         {
-            logger.Debug("A2DP.Connection.NoActiveConnection");
-            return;
+            lifecycleGate.Release();
         }
-
-        oldConnection.Dispose();
-        logger.Info("A2DP.Connection.Closed", new Dictionary<string, object?>
-        {
-            ["deviceId"] = oldDeviceId,
-        });
-        await Task.CompletedTask;
     }
 
     public async Task EnableAsync(string requestedDeviceId, CancellationToken cancellationToken = default)
@@ -263,12 +313,14 @@ public sealed class A2dpSinkService : IMediaAudioSink, IAsyncDisposable
         return new ValueTask(DisconnectAsync());
     }
 
-    private void SetState(MediaAudioSinkState nextState, string requestedDeviceId)
+    private void SetState(MediaAudioSinkState nextState, string? requestedDeviceId)
     {
         lock (sync)
         {
             state = nextState;
-            deviceId = requestedDeviceId;
+            deviceId = nextState is MediaAudioSinkState.Disabled or MediaAudioSinkState.Failed
+                ? null
+                : requestedDeviceId;
         }
         logger.Info("A2DP.Connection.State", new Dictionary<string, object?>
         {
@@ -278,17 +330,67 @@ public sealed class A2dpSinkService : IMediaAudioSink, IAsyncDisposable
         StateChanged?.Invoke(nextState);
     }
 
-    private void OnStateChanged(AudioPlaybackConnection sender, object args)
+    private void DisconnectCurrent()
     {
-        var nextState = sender.State switch
-        {
-            AudioPlaybackConnectionState.Opened => MediaAudioSinkState.Opened,
-            AudioPlaybackConnectionState.Closed => MediaAudioSinkState.Disabled,
-            _ => State,
-        };
+        string? oldDeviceId;
+        IA2dpConnection? oldConnection;
+        Action<IA2dpConnection>? oldStateChanged;
         lock (sync)
         {
+            oldConnection = connection;
+            oldDeviceId = deviceId;
+            oldStateChanged = connectionStateChanged;
+            connection = null;
+            connectionStateChanged = null;
+            deviceId = null;
+            state = MediaAudioSinkState.Disabled;
+            generation++;
+        }
+
+        if (oldConnection is null)
+        {
+            logger.Debug("A2DP.Connection.NoActiveConnection");
+            return;
+        }
+
+        if (oldStateChanged is not null)
+        {
+            oldConnection.StateChanged -= oldStateChanged;
+        }
+        oldConnection.Dispose();
+        logger.Info("A2DP.Connection.Closed", new Dictionary<string, object?>
+        {
+            ["deviceId"] = oldDeviceId,
+        });
+        StateChanged?.Invoke(MediaAudioSinkState.Disabled);
+    }
+
+    private bool IsCurrent(IA2dpConnection candidate, long candidateGeneration)
+    {
+        lock (sync)
+        {
+            return ReferenceEquals(connection, candidate) && generation == candidateGeneration;
+        }
+    }
+
+    private void OnStateChanged(IA2dpConnection sender, long senderGeneration)
+    {
+        MediaAudioSinkState nextState;
+        lock (sync)
+        {
+            if (!ReferenceEquals(connection, sender) || generation != senderGeneration)
+            {
+                return;
+            }
+
+            nextState = sender.State switch
+            {
+                AudioPlaybackConnectionState.Opened => MediaAudioSinkState.Opened,
+                AudioPlaybackConnectionState.Closed => MediaAudioSinkState.Disabled,
+                _ => state,
+            };
             state = nextState;
+            deviceId = nextState == MediaAudioSinkState.Opened ? sender.DeviceId : null;
         }
         logger.Info("A2DP.Connection.StateChanged", new Dictionary<string, object?>
         {
@@ -298,6 +400,7 @@ public sealed class A2dpSinkService : IMediaAudioSink, IAsyncDisposable
         });
         StateChanged?.Invoke(nextState);
     }
+
 
     private static string? GetProperty(DeviceInformation device, string key)
     {
