@@ -437,7 +437,7 @@ public sealed class TraceDiagnosticLogger : IWindowsDiagnosticLogger
                 if (IsExportSensitiveKey(property.Key))
                 {
                     jsonObject[property.Key] = property.Value is JsonValue value && value.TryGetValue<string>(out var text)
-                        ? RedactIdentifier(text)
+                        ? RedactExportValue(property.Key, text)
                         : "[REDACTED]";
                     continue;
                 }
@@ -460,6 +460,17 @@ public sealed class TraceDiagnosticLogger : IWindowsDiagnosticLogger
         }
     }
 
+    private static string RedactExportValue(string key, string value)
+    {
+        var compact = key.Replace("_", string.Empty, StringComparison.Ordinal)
+            .Replace("-", string.Empty, StringComparison.Ordinal)
+            .Replace(" ", string.Empty, StringComparison.Ordinal)
+            .ToLowerInvariant();
+        return compact is "message" or "stacktrace"
+            ? "[REDACTED]"
+            : RedactIdentifier(value);
+    }
+
     private static bool IsExportSensitiveKey(string key)
     {
         if (IsSecretKey(key))
@@ -473,7 +484,7 @@ public sealed class TraceDiagnosticLogger : IWindowsDiagnosticLogger
             .ToLowerInvariant();
         return compact is "id" or "deviceid" or "containerid" or "address" or "name"
             or "friendlyname" or "manufacturer" or "model" or "path" or "process"
-            or "commandline" or "username" or "user";
+            or "commandline" or "username" or "user" or "message" or "stacktrace";
     }
 
     private static string RedactIdentifier(string? value)

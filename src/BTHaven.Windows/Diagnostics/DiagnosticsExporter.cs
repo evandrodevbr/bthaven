@@ -14,19 +14,30 @@ namespace BTHaven.Windows.Diagnostics;
 
 public sealed class DiagnosticsExporter
 {
-    private const string SchemaVersion = "2";
+    private const string SchemaVersion = "3";
     private readonly IBluetoothDeviceService deviceService;
     private readonly IAudioEndpointService endpointService;
     private readonly IWindowsDiagnosticLogger logger;
+    private readonly IBluetoothDeviceInspector? deviceInspector;
+    private readonly string outputDirectory;
 
     public DiagnosticsExporter(
         IBluetoothDeviceService deviceService,
         IAudioEndpointService endpointService,
-        IWindowsDiagnosticLogger? logger = null)
+        IWindowsDiagnosticLogger? logger = null,
+        IBluetoothDeviceInspector? deviceInspector = null,
+        string? outputDirectory = null)
     {
         this.deviceService = deviceService ?? throw new ArgumentNullException(nameof(deviceService));
         this.endpointService = endpointService ?? throw new ArgumentNullException(nameof(endpointService));
         this.logger = logger ?? NullDiagnosticLogger.Instance;
+        this.deviceInspector = deviceInspector;
+        this.outputDirectory = string.IsNullOrWhiteSpace(outputDirectory)
+            ? Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+                "BTHaven",
+                "Diagnostics")
+            : outputDirectory;
     }
 
     public async Task<string> ExportAsync(CancellationToken cancellationToken = default)
@@ -35,6 +46,7 @@ public sealed class DiagnosticsExporter
         {
             ["maxLogLines"] = 5000,
             ["redacted"] = true,
+            ["includesInspection"] = deviceInspector is not null,
         });
 
         var errors = new List<object>();
@@ -43,6 +55,7 @@ public sealed class DiagnosticsExporter
         var captureEndpoints = await TryGetEndpointsAsync(AudioEndpointDirection.Capture, errors, cancellationToken).ConfigureAwait(false);
         var adapter = await TryGetAdapterAsync(errors, cancellationToken).ConfigureAwait(false);
         var hfp = await TryGetHfpAsync(errors, cancellationToken).ConfigureAwait(false);
+        var inspections = await TryGetInspectionsAsync(devices, errors, cancellationToken).ConfigureAwait(false);
         var recentLogs = logger.ReadRecent(maxLines: 5000, redactSensitive: true);
 
         var payload = new
@@ -55,6 +68,7 @@ public sealed class DiagnosticsExporter
             architecture = System.Runtime.InteropServices.RuntimeInformation.OSArchitecture.ToString(),
             adapter,
             devices = devices.Select(SanitizeDevice).ToArray(),
+            inspections = inspections.Select(SanitizeInspection).ToArray(),
             audioEndpoints = renderEndpoints.Concat(captureEndpoints).Select(SanitizeEndpoint).ToArray(),
             hfp,
             errors,
@@ -73,13 +87,9 @@ public sealed class DiagnosticsExporter
             WriteIndented = true,
             DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull,
         });
-        var directory = Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-            "BTHaven",
-            "Diagnostics");
-        Directory.CreateDirectory(directory);
-        var path = Path.Combine(directory, $"BTHaven-diagnostics-{DateTimeOffset.UtcNow:yyyyMMdd-HHmmss}.zip");
-        using (var archive = System.IO.Compression.ZipFile.Open(path, System.IO.Compression.ZipArchiveMode.Create))
+        Directory.CreateDirectory(outputDirectory);
+        using var stream = OpenUniqueArchiveFile(outputDirectory, out var path);
+        using (var archive = new System.IO.Compression.ZipArchive(stream, System.IO.Compression.ZipArchiveMode.Create))
         {
             WriteEntry(archive, "diagnostics.json", json);
             WriteEntry(archive, "logs.jsonl", string.Join(Environment.NewLine, recentLogs) + (recentLogs.Count == 0 ? string.Empty : Environment.NewLine));
@@ -90,6 +100,7 @@ public sealed class DiagnosticsExporter
         {
             ["path"] = path,
             ["deviceCount"] = devices.Count,
+            ["inspectionCount"] = inspections.Count,
             ["endpointCount"] = renderEndpoints.Count + captureEndpoints.Count,
             ["errorCount"] = errors.Count,
             ["logLineCount"] = recentLogs.Count,
@@ -132,6 +143,35 @@ public sealed class DiagnosticsExporter
             AddError(errors, $"audio:{direction}", exception);
             return [];
         }
+    }
+
+    private async Task<IReadOnlyList<BluetoothDeviceInspectionSnapshot>> TryGetInspectionsAsync(
+        IReadOnlyList<BluetoothDeviceModel> devices,
+        List<object> errors,
+        CancellationToken cancellationToken)
+    {
+        if (deviceInspector is null)
+        {
+            return [];
+        }
+
+        var snapshots = new List<BluetoothDeviceInspectionSnapshot>(devices.Count);
+        foreach (var device in devices)
+        {
+            try
+            {
+                snapshots.Add(await deviceInspector.InspectAsync(device, cancellationToken).ConfigureAwait(false));
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                throw;
+            }
+            catch (Exception exception)
+            {
+                AddError(errors, $"inspection:{Redact(device.Id)}", exception);
+            }
+        }
+        return snapshots;
     }
 
     private static async Task<object> TryGetAdapterAsync(List<object> errors, CancellationToken cancellationToken)
@@ -214,6 +254,157 @@ public sealed class DiagnosticsExporter
         };
     }
 
+    private static object SanitizeInspection(BluetoothDeviceInspectionSnapshot snapshot)
+    {
+        return new
+        {
+            deviceId = Redact(snapshot.DeviceId),
+            name = "<redacted>",
+            containerId = Redact(snapshot.ContainerId),
+            manufacturer = snapshot.Manufacturer is null ? null : "<redacted>",
+            model = snapshot.Model is null ? null : "<redacted>",
+            address = "<redacted>",
+            classOfDevice = snapshot.ClassOfDevice,
+            connectionStatus = snapshot.ConnectionStatus,
+            paired = snapshot.IsPaired,
+            connected = snapshot.IsConnected,
+            present = snapshot.IsPresent,
+            rssi = snapshot.Rssi,
+            hostName = snapshot.HostName is null ? null : "<redacted>",
+            securePairing = snapshot.WasSecureConnectionUsedForPairing,
+            transport = snapshot.Transport.ToString(),
+            observedAt = snapshot.ObservedAt,
+            properties = snapshot.DeviceProperties.Select(SanitizeProperty).ToArray(),
+            endpoints = snapshot.Endpoints.Select(endpoint => new
+            {
+                id = Redact(endpoint.Id),
+                kind = endpoint.Kind,
+                name = "<redacted>",
+                transport = endpoint.Transport.ToString(),
+                source = endpoint.Source,
+                containerId = Redact(endpoint.ContainerId),
+                address = "<redacted>",
+                manufacturer = endpoint.Manufacturer is null ? null : "<redacted>",
+                model = endpoint.Model is null ? null : "<redacted>",
+                rssi = endpoint.Rssi,
+                paired = endpoint.IsPaired,
+                connected = endpoint.IsConnected,
+                present = endpoint.IsPresent,
+                protocolId = Redact(endpoint.ProtocolId),
+                status = endpoint.Status,
+                observedAt = endpoint.ObservedAt,
+                hResult = endpoint.HResult,
+                message = endpoint.Message is null ? null : "<redacted>",
+                properties = endpoint.Properties.Select(SanitizeProperty).ToArray(),
+            }).ToArray(),
+            battery = snapshot.BatteryObservations.Select(observation => new
+            {
+                source = observation.Source,
+                status = observation.Status,
+                percentage = observation.Percentage,
+                charging = observation.IsCharging,
+                confidence = observation.Confidence.ToString(),
+                observedAt = observation.ObservedAt,
+                hResult = observation.HResult,
+                message = observation.Message is null ? null : "<redacted>",
+            }).ToArray(),
+            profiles = snapshot.ProfileObservations.Select(profile => new
+            {
+                profile = profile.Profile,
+                source = profile.Source,
+                status = profile.Status,
+                deviceId = Redact(profile.DeviceId),
+                observedAt = profile.ObservedAt,
+                hResult = profile.HResult,
+                message = profile.Message is null ? null : "<redacted>",
+            }).ToArray(),
+            remoteVolume = snapshot.RemoteVolume is null ? null : new
+            {
+                availability = snapshot.RemoteVolume.Availability.ToString(),
+                source = snapshot.RemoteVolume.Source,
+                level = snapshot.RemoteVolume.Level,
+                observedAt = snapshot.RemoteVolume.ObservedAt,
+                hResult = snapshot.RemoteVolume.HResult,
+                message = snapshot.RemoteVolume.Message is null ? null : "<redacted>",
+            },
+            gatt = snapshot.GattServices.Select(service => new
+            {
+                uuid = service.Uuid,
+                attributeHandle = service.AttributeHandle,
+                status = service.Status,
+                source = service.Source,
+                observedAt = service.ObservedAt,
+                hResult = service.HResult,
+                message = service.Message is null ? null : "<redacted>",
+                characteristics = service.Characteristics.Select(characteristic => new
+                {
+                    uuid = characteristic.Uuid,
+                    attributeHandle = characteristic.AttributeHandle,
+                    properties = characteristic.Properties,
+                    userDescription = characteristic.UserDescription,
+                    status = characteristic.Status,
+                    descriptorStatus = characteristic.DescriptorStatus,
+                    source = characteristic.Source,
+                    observedAt = characteristic.ObservedAt,
+                    hResult = characteristic.HResult,
+                    message = characteristic.Message is null ? null : "<redacted>",
+                    descriptors = characteristic.Descriptors.Select(descriptor => new
+                    {
+                        uuid = descriptor.Uuid,
+                        attributeHandle = descriptor.AttributeHandle,
+                        source = descriptor.Source,
+                        observedAt = descriptor.ObservedAt,
+                        hResult = descriptor.HResult,
+                        message = descriptor.Message is null ? null : "<redacted>",
+                    }).ToArray(),
+                }).ToArray(),
+            }).ToArray(),
+            rfcomm = snapshot.RfcommServices.Select(service => new
+            {
+                serviceId = Redact(service.ServiceId),
+                knownName = service.KnownName,
+                deviceId = Redact(service.DeviceId),
+                source = service.Source,
+                status = service.Status,
+                observedAt = service.ObservedAt,
+                hResult = service.HResult,
+                message = service.Message is null ? null : "<redacted>",
+            }).ToArray(),
+            diagnostics = snapshot.Diagnostics.Select(diagnostic => new
+            {
+                operation = diagnostic.Operation,
+                source = diagnostic.Source,
+                status = diagnostic.Status,
+                hResult = diagnostic.HResult,
+                exceptionType = diagnostic.ExceptionType,
+                message = diagnostic.Message is null ? null : "<redacted>",
+                observedAt = diagnostic.ObservedAt,
+            }).ToArray(),
+        };
+    }
+
+    private static object SanitizeProperty(BluetoothObservedProperty property)
+    {
+        var sensitive = property.Key.Contains("name", StringComparison.OrdinalIgnoreCase)
+            || property.Key.Contains("address", StringComparison.OrdinalIgnoreCase)
+            || property.Key.Contains("container", StringComparison.OrdinalIgnoreCase)
+            || property.Key.Contains("manufacturer", StringComparison.OrdinalIgnoreCase)
+            || property.Key.Contains("model", StringComparison.OrdinalIgnoreCase)
+            || property.Key.Contains("friendly", StringComparison.OrdinalIgnoreCase)
+            || property.Key.EndsWith("Id", StringComparison.OrdinalIgnoreCase);
+        return new
+        {
+            key = property.Key,
+            type = property.Type,
+            value = sensitive ? Redact(property.Value) : property.Value,
+            source = property.Source,
+            status = property.Status,
+            observedAt = property.ObservedAt,
+            hResult = property.HResult,
+            message = property.Message is null ? null : "<redacted>",
+        };
+    }
+
     private static object SanitizeEndpoint(AudioEndpointModel endpoint)
     {
         return new
@@ -246,6 +437,31 @@ public sealed class DiagnosticsExporter
             exceptionType = exception.GetType().FullName,
             hResult = $"0x{exception.HResult:X8}",
         });
+    }
+
+    private static FileStream OpenUniqueArchiveFile(string directory, out string path)
+    {
+        var prefix = Path.Combine(directory, $"BTHaven-diagnostics-{DateTimeOffset.UtcNow:yyyyMMdd-HHmmss}");
+        path = string.Empty;
+        for (var index = 0; index < 100; index++)
+        {
+            path = index == 0 ? $"{prefix}.zip" : $"{prefix}-{index:00}.zip";
+            try
+            {
+                return new FileStream(
+                    path,
+                    FileMode.CreateNew,
+                    FileAccess.Write,
+                    FileShare.None,
+                    bufferSize: 4096,
+                    options: FileOptions.SequentialScan);
+            }
+            catch (IOException) when (index < 99)
+            {
+            }
+        }
+
+        throw new IOException("Could not create a unique diagnostics archive path.");
     }
 
     private static void WriteEntry(System.IO.Compression.ZipArchive archive, string name, string content)

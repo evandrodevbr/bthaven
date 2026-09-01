@@ -45,4 +45,35 @@ public sealed class TraceDiagnosticLoggerTests
             Directory.Delete(directory, recursive: true);
         }
     }
+
+    [Fact]
+    [Trait("Category", "Integration")]
+    public void Redacted_exception_logs_hide_device_identity_but_keep_type_and_hresult()
+    {
+        var directory = Path.Combine(Path.GetTempPath(), "bthaven-logger-tests", Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(directory);
+        const string deviceId = "device-sensitive-123";
+        const string deviceName = "Living Room Headset";
+        try
+        {
+            var logger = new TraceDiagnosticLogger(directory);
+            var exception = new InvalidOperationException($"deviceId={deviceId}; name={deviceName}");
+
+            logger.Error("Test.SensitiveError", exception);
+
+            var redacted = logger.ReadRecent(100, redactSensitive: true);
+            var line = Assert.Single(redacted, item => item.Contains("Test.SensitiveError", StringComparison.Ordinal));
+
+            Assert.DoesNotContain(deviceId, line, StringComparison.Ordinal);
+            Assert.DoesNotContain(deviceName, line, StringComparison.Ordinal);
+            Assert.Contains("[REDACTED]", line, StringComparison.Ordinal);
+            Assert.Contains("InvalidOperationException", line, StringComparison.Ordinal);
+            Assert.Contains("hResult", line, StringComparison.Ordinal);
+        }
+        finally
+        {
+            Directory.Delete(directory, recursive: true);
+        }
+    }
+
 }
