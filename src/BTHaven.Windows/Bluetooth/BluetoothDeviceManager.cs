@@ -282,7 +282,7 @@ public sealed class BluetoothDeviceManager : IBluetoothDeviceService, IAsyncDisp
             after = BuildModelLocked(logicalKey);
         }
 
-        PublishChange(before, after);
+        PublishChange(before, after, endpointId);
         logger.Info("Bluetooth.Device.Removed", new Dictionary<string, object?>
         {
             ["deviceId"] = endpointId,
@@ -351,14 +351,34 @@ public sealed class BluetoothDeviceManager : IBluetoothDeviceService, IAsyncDisp
         });
     }
 
-    private void PublishChange(BluetoothDeviceModel? before, BluetoothDeviceModel? after)
+    private void PublishChange(
+        BluetoothDeviceModel? before,
+        BluetoothDeviceModel? after,
+        string? endpointId = null)
     {
         BluetoothDeviceChange? change = before is null && after is not null
-            ? new BluetoothDeviceChange { Kind = BluetoothDeviceChangeKind.Added, DeviceId = after.Id, Device = after }
+            ? new BluetoothDeviceChange
+            {
+                Kind = BluetoothDeviceChangeKind.Added,
+                DeviceId = after.Id,
+                EndpointId = endpointId,
+                Device = after,
+            }
             : before is not null && after is null
-                ? new BluetoothDeviceChange { Kind = BluetoothDeviceChangeKind.Removed, DeviceId = before.Id }
+                ? new BluetoothDeviceChange
+                {
+                    Kind = BluetoothDeviceChangeKind.Removed,
+                    DeviceId = before.Id,
+                    EndpointId = endpointId,
+                }
                 : before is not null && after is not null
-                    ? new BluetoothDeviceChange { Kind = BluetoothDeviceChangeKind.Updated, DeviceId = after.Id, Device = after }
+                    ? new BluetoothDeviceChange
+                    {
+                        Kind = BluetoothDeviceChangeKind.Updated,
+                        DeviceId = after.Id,
+                        EndpointId = endpointId,
+                        Device = after,
+                    }
                     : null;
 
         if (change is not null)

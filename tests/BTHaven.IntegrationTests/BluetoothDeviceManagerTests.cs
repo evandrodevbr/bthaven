@@ -50,10 +50,13 @@ public sealed class BluetoothDeviceManagerTests
         Assert.Contains("A2DP", model.Profiles);
         Assert.Contains("Battery", model.Profiles);
 
-        Assert.Equal(BluetoothDeviceChangeKind.Added, ReadChange(manager).Kind);
+        var added = ReadChange(manager);
+        Assert.Equal(BluetoothDeviceChangeKind.Added, added.Kind);
+        Assert.Null(added.EndpointId);
         var updated = ReadChange(manager);
         Assert.Equal(BluetoothDeviceChangeKind.Updated, updated.Kind);
         Assert.Equal(model.Id, updated.DeviceId);
+        Assert.Null(updated.EndpointId);
     }
 
     [Fact]
@@ -71,6 +74,7 @@ public sealed class BluetoothDeviceManagerTests
         var change = ReadChange(manager);
         var model = Assert.Single(manager.GetModelsForTesting());
         Assert.Equal(BluetoothDeviceChangeKind.Updated, change.Kind);
+        Assert.Equal(classic.Id, change.EndpointId);
         Assert.Equal("container:CONTAINER-01", change.DeviceId);
         Assert.Equal(change.DeviceId, model.Id);
         Assert.Single(model.Endpoints);
@@ -93,6 +97,7 @@ public sealed class BluetoothDeviceManagerTests
 
         var change = ReadChange(manager);
         Assert.Equal(BluetoothDeviceChangeKind.Removed, change.Kind);
+        Assert.Equal(ble.Id, change.EndpointId);
         Assert.Equal("container:CONTAINER-01", change.DeviceId);
         Assert.Empty(manager.GetModelsForTesting());
     }

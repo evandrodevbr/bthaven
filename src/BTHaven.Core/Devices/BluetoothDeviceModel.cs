@@ -112,5 +112,6 @@ public sealed record BluetoothDeviceChange
 {
     public required BluetoothDeviceChangeKind Kind { get; init; }
     public required string DeviceId { get; init; }
+    public string? EndpointId { get; init; }
     public BluetoothDeviceModel? Device { get; init; }
 }
