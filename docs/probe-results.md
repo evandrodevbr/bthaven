@@ -1,6 +1,6 @@
 # Phase 0 probe results
 
-This file is the evidence ledger for the current Windows machine. It is updated from command output, not from compilation alone. Raw logs are intentionally kept out of git because they can contain device names, IDs, Bluetooth addresses, and endpoint names.
+This file is the sanitized evidence ledger for the current Windows machine. It is updated from command output, not from compilation alone. Raw logs stay out of git because they can contain device names, IDs, Bluetooth addresses, endpoint names, and local paths.
 
 ## Environment
 
@@ -8,125 +8,187 @@ This file is the evidence ledger for the current Windows machine. It is updated 
 |---|---|
 | Windows build | `Microsoft Windows 10.0.26200` |
 | Windows SDK | `10.0.26100.0` include/lib |
-| .NET SDK | `10.0.400` installed per-user at `C:\Users\evand\.dotnet` |
+| .NET SDK | `10.0.400` |
 | .NET runtime | `10.0.11`, `win-x64` |
+| MSBuild | `18.9.6+14fbf8d52` |
 | Bluetooth adapter | available; Classic and Low Energy both supported |
-| Current probe run | `2026-08-31T01:46:26Z`–`01:47:36Z` |
+| Current refresh | `2026-09-01T12:11:54Z`-`12:14:11Z` |
 
 ## Status summary
 
 ```text
-DEVICE ENUMERATION: PASS    (paired Android phone observed; Classic endpoint connected)
-BATTERY:            PARTIAL (Windows controller absent; association/GATT sources unavailable)
-A2DP SINK:          PARTIAL (official target opened with Success; audible playback not yet listened to)
-HFP PHONE LINK:     BLOCKED (transport found, access DeniedBySystem, RegisterApp 0x80070005)
-HFP CALL AUDIO:     BLOCKED (registration/connect and bidirectional call test not available)
+DEVICE ENUMERATION: PASS       (adapter, paired snapshots, and watchers completed)
+BATTERY:            PARTIAL    (no Windows controller; GATT source unreachable)
+A2DP SINK:          NOT RUN    (discovery only; no device ID or open attempt)
+HFP PHONE LINK:     NOT RUN    (discovery only; activation flags were omitted)
+CALL AUDIO INVENTORY: PASS     (endpoint counts and default roles observed)
+INSPECTION:         PASS       (read-only summary; unavailable fields retained)
+REMOTE VOLUME:      NOT EXPOSED (public Windows application surface)
 ```
 
 ## Per-probe evidence
 
-### 01 — device enumeration: PASS
+### 01 - device enumeration: PASS
 
 - adapter returned `available=true`;
-- `IsClassicSupported=true`;
-- `IsLowEnergySupported=true`;
-- `classic-paired`: count `1`;
-- `classic-connected`: count `1`;
-- `ble-paired`: count `1`;
-- `ble-connected`: the snapshot returned `0x80004004` during one transient query, while the BLE paired watcher completed normally;
+- Classic support: `true`;
+- Low Energy support: `true`;
+- Classic paired snapshot: count `1`;
+- Classic connected snapshot: count `0`;
+- BLE paired snapshot: count `1`;
+- BLE connected snapshot: count `0`;
 - both paired watchers reached `EnumerationCompleted` and `Stopped`;
-- the Classic and BLE observations shared one logical container and the same phone name.
+- `Probe.Completed` reported `uniqueDeviceCount=2` with a one-second watch.
 
-The app must continue to distinguish the Classic connected endpoint from the BLE paired/present endpoint; they are not interchangeable states.
+This run proves read-only enumeration and watcher lifecycle. It did not observe a connected endpoint.
 
-### 02 — battery: PARTIAL
+### 02 - battery: PARTIAL
 
 - Windows battery controllers: `0`;
 - Bluetooth association devices inspected: `1`;
-- Windows battery properties were present as null for the phone;
-- BLE Battery Service discovery returned `Unreachable` with service count `0`;
-- no percentage was invented.
+- GATT devices: `1`;
+- GATT Battery Service query status: `Unreachable`;
+- GATT service count: `0`;
+- battery result: unavailable; no percentage was invented.
 
-The current phone therefore reports `battery=unavailable`, which is the correct result for the observed sources.
+The process completed successfully, but the current environment did not expose a readable battery source.
 
-### 03 — A2DP sink: PARTIAL, connection API passed
+### 03 - A2DP sink: NOT RUN
 
-- `AudioPlaybackConnection.GetDeviceSelector()` returned `1` target for the paired phone;
-- the probe used the first ID returned directly by that selector (`--exercise-first`), avoiding shell escaping;
-- `StartAsync()` completed;
-- `StateChanged` reported `Opened`;
-- `OpenAsync()` returned `Success`;
-- the connection stayed alive for the requested hold period and was disposed cleanly;
-- the current default Windows render endpoint is the headset `Speakers (PRO X 2 LIGHTSPEED)`.
+- Windows audio playback selector returned `1` target;
+- the probe was run without `--device-id`;
+- no `StartAsync` or `OpenAsync` call was attempted;
+- process exit code: `0`;
+- event: `A2DP.Sink.NotExercised`.
 
-This is a positive API/transport result. The remaining acceptance step is audible playback: start media on the phone, select the PC as the phone's Bluetooth media output, activate BTHaven, and listen on the Windows default headset. The public API routes through the Windows system default endpoint; it does not expose an arbitrary per-connection WASAPI endpoint selector.
+This is discovery evidence only. It intentionally does not claim an A2DP connection or audible playback.
 
-### 04 — HFP phone link: BLOCKED
+### 04 - HFP phone link: DISCOVERY ONLY
 
-- `PhoneLineTransportDevice` type: present;
+- `PhoneLineTransportDevice` API type: present;
 - `CallsPhoneContract` v5: present;
-- `GetDeviceSelector()`: returned a selector;
-- concrete transport devices: `1`;
-- transport: Bluetooth;
-- `AudioRoutingStatus`: `CanRouteToLocalDevice`;
-- in-band ringing: `true`;
+- selector creation: succeeded;
+- transport devices found: `1`;
+- observed transport: Bluetooth;
+- observed `AudioRoutingStatus`: `CanRouteToLocalDevice`;
 - initial registration: `false`;
-- `RequestAccessAsync`: `DeniedBySystem`;
-- `RegisterApp`: `UnauthorizedAccessException`, `HRESULT 0x80070005`;
-- `ConnectAsync`: not reached after registration/access rejection;
 - generic HFP Hands-Free Unit role: not proven.
 
-Microsoft's API references require the restricted `phoneLineTransportManagement` capability for the access/registration operations. The app exposes a button that calls the real path and reports this result; it does not label HFP active after discovery alone.
+The probe was run with no arguments. `RequestAccessAsync`, `RegisterApp`, and `ConnectAsync` were not run; therefore HFP activation was not exercised. No `--request-access`, `--register`, or `--connect` flag was passed.
 
-### 05 — Core Audio endpoint inventory: PASS
+### 05 - Core Audio endpoint inventory: PASS
 
 - active render endpoints: `3`;
+- disabled render endpoints: `0`;
+- unplugged render endpoints: `2`;
 - active capture endpoints: `2`;
-- default render and communications endpoint: `Speakers (PRO X 2 LIGHTSPEED)`;
-- default communications capture endpoint: `Microphone (PRO X 2 LIGHTSPEED)`;
-- default render format: `48000Hz/2ch/Extensible`;
-- default capture format: `48000Hz/2ch/IeeeFloat`;
-- unplugged mix-format queries returned `0x88890004`, logged rather than hidden.
+- disabled capture endpoints: `1`;
+- unplugged capture endpoints: `2`;
+- default render Multimedia role: observed;
+- default render Communications role: observed;
+- default capture Communications role: observed.
 
-This proves endpoint discovery and identifies the expected headset path. It does not prove HFP call PCM.
+This proves public endpoint discovery and default-role selection. It does not prove HFP call PCM or bidirectional call audio.
+
+### 06 - full Bluetooth inspection: PASS with explicit unavailable fields
+
+- one paired device was selected for read-only inspection;
+- snapshot endpoint count: `4`;
+- Classic endpoint count: `2`;
+- BLE endpoint count: `2`;
+- GATT service count: `0`;
+- RFCOMM service count: `0`;
+- battery observation: `Unavailable`, confidence `Unknown`;
+- A2DP profile: `Available`;
+- HFP profile: `Discovered`;
+- remote-volume status: `NotExposed`;
+- diagnostic count: `10`;
+- process exit code: `0`.
+
+The inspector retained unavailable states instead of inventing battery, GATT, RFCOMM, or remote-volume capabilities.
+
+### Remote volume boundary
+
+The implementation and probes intentionally do not change phone volume. The public `AudioPlaybackConnection` surface exposes the A2DP playback connection lifecycle, not a general application-level AVRCP volume command. `WindowsRemoteVolumeService` reports this boundary explicitly.
 
 ## Build and test evidence
 
-```text
-dotnet build BTHaven.slnx -c Release -p:Platform=x64 --no-restore
-0 warnings, 0 errors
+### Build
 
-dotnet test BTHaven.slnx -c Release -p:Platform=x64 --no-restore
-Core: 11 passed, 0 failed
-Integration: 7 passed, 0 failed
+```text
+powershell.exe -NoProfile -Command '& "$env:USERPROFILE/.dotnet/dotnet.exe" build BTHaven.slnx -c Release -p:Platform=x64 --no-restore'
+Succeeded; 0 errors; 2 warnings.
+
+powershell.exe -NoProfile -Command '& "$env:USERPROFILE/.dotnet/dotnet.exe" build src/BTHaven.App/BTHaven.App.csproj -c Release -p:Platform=x64 --no-restore'
+Succeeded; 0 errors; 2 warnings.
 ```
 
-## Reproduction commands
+Both builds reported the same CS8604 warning at `src/BTHaven.App/MainPage.xaml.cs:756` for a possible null `requestedDeviceId` passed to `A2dpSinkService.ConnectAsync`. The App build confirms the untracked `MainPage.Actions.cs` compiles in x64 Release.
 
-### PowerShell
+### Tests
+
+The required serial no-build runs and the standard runs were both executed with `-m:1`.
+
+| Mode | Project | Result |
+|---|---|---|
+| `--no-build` | `BTHaven.Core.Tests` | `22` total, `22` passed, `0` failed; exit `0` |
+| `--no-build` | `BTHaven.IntegrationTests` | `51` total, `49` passed, `2` failed; exit `1` |
+| standard | `BTHaven.Core.Tests` | `22` total, `22` passed, `0` failed; exit `0` |
+| standard | `BTHaven.IntegrationTests` | `51` total, `49` passed, `2` failed; exit `1` |
+
+The two Integration failures are explicit environment limits, not skipped tests:
+
+1. `BluetoothDeviceInspectorTests.Inspection_includes_classic_and_ble_endpoints_for_the_connected_phone` failed with `Connected dual-mode Bluetooth hardware phone required.` The current run had no connected dual-mode phone.
+2. `WindowsAudioServicesSmokeTests.A2dp_service_opens_the_first_windows_remote_audio_target` failed because `A2dpSinkService.ConnectAsync` returned `false` (`Assert.True` expected `true`). Discovery found a target, but this Windows device/runtime did not open it.
+
+## Dependency and secrets scans
+
+```text
+powershell.exe -NoProfile -Command '& "$env:USERPROFILE/.dotnet/dotnet.exe" list BTHaven.slnx package --vulnerable --include-transitive'
+No vulnerable packages reported for all 12 projects using the current NuGet source.
+
+where.exe osv-scanner
+Not available on this machine.
+
+detect-secrets scan
+Results: {}.
+
+detect-secrets scan src tests probes --exclude-files ".*(\\\\|/)bin(\\\\|/).*|.*(\\\\|/)obj(\\\\|/).*"
+Results: {}.
+```
+
+The second secrets scan covered source, test, and probe trees while excluding generated `bin` and `obj` content. No secret values were recorded.
+
+## Commands run in this refresh
+
+### SDK, builds, and tests
 
 ```powershell
-Set-Location 'C:\Users\evand\Documents\GitHub\bthaven'
-$env:Path = "$env:USERPROFILE\.dotnet;$env:Path"
-& "$env:USERPROFILE\.dotnet\dotnet.exe" run --project '.\probes\03-a2dp-sink\03-a2dp-sink.csproj' -c Release -- --exercise-first --hold-seconds 15
-& "$env:USERPROFILE\.dotnet\dotnet.exe" run --project '.\probes\04-phone-hfp\04-phone-hfp.csproj' -c Release -- --request-access --register --connect
+powershell.exe -NoProfile -Command '& "$env:USERPROFILE/.dotnet/dotnet.exe" --info'
+powershell.exe -NoProfile -Command '& "$env:USERPROFILE/.dotnet/dotnet.exe" build BTHaven.slnx -c Release -p:Platform=x64 --no-restore'
+powershell.exe -NoProfile -Command '& "$env:USERPROFILE/.dotnet/dotnet.exe" build src/BTHaven.App/BTHaven.App.csproj -c Release -p:Platform=x64 --no-restore'
+powershell.exe -NoProfile -Command '& "$env:USERPROFILE/.dotnet/dotnet.exe" test tests/BTHaven.Core.Tests/BTHaven.Core.Tests.csproj -c Release -m:1 --no-build --logger "console;verbosity=normal"'
+powershell.exe -NoProfile -Command '& "$env:USERPROFILE/.dotnet/dotnet.exe" test tests/BTHaven.IntegrationTests/BTHaven.IntegrationTests.csproj -c Release -m:1 --no-build --logger "console;verbosity=normal"'
+powershell.exe -NoProfile -Command '& "$env:USERPROFILE/.dotnet/dotnet.exe" test tests/BTHaven.Core.Tests/BTHaven.Core.Tests.csproj -c Release -m:1 --logger "console;verbosity=normal"'
+powershell.exe -NoProfile -Command '& "$env:USERPROFILE/.dotnet/dotnet.exe" test tests/BTHaven.IntegrationTests/BTHaven.IntegrationTests.csproj -c Release -m:1 --logger "console;verbosity=normal"'
 ```
 
-### Git Bash
+### Read-only probes
 
-```bash
-export PATH="$HOME/.dotnet:$PATH"
-dotnet run --project probes/01-device-enumeration -c Release -- --watch-seconds 5
-dotnet run --project probes/02-battery -c Release
-dotnet run --project probes/03-a2dp-sink -c Release -- --exercise-first --hold-seconds 15
-dotnet run --project probes/04-phone-hfp -c Release -- --request-access --register --connect
-dotnet run --project probes/05-call-audio-routing -c Release
+```powershell
+powershell.exe -NoProfile -Command '& "./probes/01-device-enumeration/bin/Release/net10.0-windows10.0.26100.0/BTHaven.Probe.DeviceEnumeration.exe" --watch-seconds 1'
+powershell.exe -NoProfile -Command '& "./probes/02-battery/bin/Release/net10.0-windows10.0.26100.0/BTHaven.Probe.Battery.exe"'
+powershell.exe -NoProfile -Command '& "./probes/03-a2dp-sink/bin/Release/net10.0-windows10.0.26100.0/BTHaven.Probe.A2dpSink.exe"'
+powershell.exe -NoProfile -Command '& "./probes/04-phone-hfp/bin/Release/net10.0-windows10.0.26100.0/BTHaven.Probe.PhoneHfp.exe"'
+powershell.exe -NoProfile -Command '& "./probes/05-call-audio-routing/bin/Release/net10.0-windows10.0.26100.0/BTHaven.Probe.CallAudioRouting.exe"'
+powershell.exe -NoProfile -Command '& "./probes/06-device-inspection/bin/Release/net10.0-windows10.0.26100.0/BTHaven.Probe.DeviceInspection.exe"'
 ```
 
-## What remains before the gate can close
+All six probe processes exited `0`. Probe 03 omitted `--device-id`; probe 04 omitted `--request-access`, `--register`, and `--connect`.
 
-1. Run the updated BTHaven UI with the phone selected and click **Ativar áudio do smartphone**.
-2. Start phone media and verify audible output on the Windows default headset.
-3. Verify reconnect after the phone or A2DP target disappears and returns.
-4. Keep HFP blocked until restricted capability approval and a real bidirectional call test exist.
-5. Do not add a custom driver, HCI hook, or Phone Link reverse engineering silently.
+## Explicit boundaries
+
+- HFP access, registration, and connection activation were not run.
+- A2DP open/hold and audible playback were not run.
+- No MSIX publish, packaging, install, or deployment command was run.
+- The two hardware-dependent Integration failures above remain visible; they were not converted into skips or masked.
