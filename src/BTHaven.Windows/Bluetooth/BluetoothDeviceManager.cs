@@ -128,6 +128,23 @@ public sealed class BluetoothDeviceManager : IBluetoothDeviceService, IAsyncDisp
         return ValueTask.CompletedTask;
     }
 
+    internal void ApplyObservationForTesting(BluetoothDeviceObservation observation) =>
+        ApplyObservation(observation);
+
+    internal void RemoveObservationForTesting(string endpointId, BluetoothTransport transport) =>
+        HandleRemoved(endpointId, transport);
+
+    internal IReadOnlyList<BluetoothDeviceModel> GetModelsForTesting()
+    {
+        lock (sync)
+        {
+            return BuildModelsLocked().Values.ToArray();
+        }
+    }
+
+    internal bool TryReadChangeForTesting(out BluetoothDeviceChange? change) =>
+        changes.Reader.TryRead(out change);
+
     private Task EnsureStartedAsync(CancellationToken cancellationToken)
     {
         Task task;
@@ -286,7 +303,8 @@ public sealed class BluetoothDeviceManager : IBluetoothDeviceService, IAsyncDisp
         {
             endpointObservations.TryGetValue(observation.Id, out var previous);
             oldLogicalKey = previous is null ? null : LogicalKey(previous);
-            before = oldLogicalKey is null ? null : BuildModelLocked(oldLogicalKey);
+            var beforeLogicalKey = oldLogicalKey ?? newLogicalKey;
+            before = BuildModelLocked(beforeLogicalKey);
 
             if (previous is not null && !string.Equals(oldLogicalKey, newLogicalKey, StringComparison.OrdinalIgnoreCase))
             {
@@ -366,7 +384,10 @@ public sealed class BluetoothDeviceManager : IBluetoothDeviceService, IAsyncDisp
 
     private static BluetoothDeviceModel Merge(IEnumerable<BluetoothDeviceObservation> observations)
     {
-        var items = observations.ToArray();
+        var items = observations
+            .OrderBy(item => item.Transport)
+            .ThenBy(item => item.Id, StringComparer.OrdinalIgnoreCase)
+            .ToArray();
         var first = items[0];
         var hasClassic = items.Any(item => item.Transport is BluetoothTransport.Classic or BluetoothTransport.DualMode);
         var hasBle = items.Any(item => item.Transport is BluetoothTransport.LowEnergy or BluetoothTransport.DualMode);
@@ -389,7 +410,7 @@ public sealed class BluetoothDeviceManager : IBluetoothDeviceService, IAsyncDisp
 
         return new BluetoothDeviceModel
         {
-            Id = first.Id,
+            Id = BluetoothDeviceIdentity.GetLogicalId(first),
             ContainerId = items.Select(item => item.ContainerId).FirstOrDefault(value => !string.IsNullOrWhiteSpace(value)),
             Name = items.Select(item => item.Name).FirstOrDefault(value => !string.IsNullOrWhiteSpace(value)) ?? "Bluetooth device",
             Manufacturer = items.Select(item => item.Manufacturer).FirstOrDefault(value => !string.IsNullOrWhiteSpace(value)),
@@ -402,16 +423,23 @@ public sealed class BluetoothDeviceManager : IBluetoothDeviceService, IAsyncDisp
             IsPresent = items.Any(item => item.IsPresent == true),
             Rssi = items.Select(item => item.Rssi).FirstOrDefault(value => value.HasValue),
             Capabilities = capabilities,
+            Endpoints = items
+                .Select(item => new BluetoothEndpointReference
+                {
+                    Id = item.Id,
+                    Transport = item.Transport,
+                    ContainerId = item.ContainerId,
+                    Address = item.Address,
+                })
+                .ToArray(),
             Services = items.SelectMany(item => item.Services).Distinct(StringComparer.OrdinalIgnoreCase).OrderBy(value => value).ToArray(),
             Profiles = items.SelectMany(item => item.Profiles).Distinct(StringComparer.OrdinalIgnoreCase).OrderBy(value => value).ToArray(),
             LastUpdated = items.Max(item => item.ObservedAt),
         };
     }
 
-    private static string LogicalKey(BluetoothDeviceObservation observation)
-    {
-        return string.IsNullOrWhiteSpace(observation.ContainerId) ? observation.Id : observation.ContainerId;
-    }
+    private static string LogicalKey(BluetoothDeviceObservation observation) =>
+        BluetoothDeviceIdentity.GetLogicalId(observation);
 
     private static TaskCompletionSource<bool> NewCompletionSource()
     {
