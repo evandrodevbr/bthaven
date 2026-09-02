@@ -50,6 +50,7 @@ public sealed partial class MainPage : Page
     public MainPage()
     {
         InitializeComponent();
+        DetailSelectorBar.SelectedItem = SummarySelectorItem;
         preferredDeviceId = LoadPreferredDeviceId();
 
         logger = TraceDiagnosticLogger.Instance;
@@ -1024,6 +1025,17 @@ public sealed partial class MainPage : Page
                 && devices.TryGetValue(selectedDeviceId, out var currentDevice)
                 && currentDevice.Category == BluetoothDeviceCategory.Smartphone;
         }
+    }
+
+    private void DetailSelectorBar_SelectionChanged(
+        SelectorBar sender,
+        SelectorBarSelectionChangedEventArgs args)
+    {
+        var showAudio = ReferenceEquals(sender.SelectedItem, AudioSelectorItem);
+        var showDiagnostics = ReferenceEquals(sender.SelectedItem, DiagnosticsSelectorItem);
+        SummaryView.Visibility = showAudio || showDiagnostics ? Visibility.Collapsed : Visibility.Visible;
+        AudioView.Visibility = showAudio ? Visibility.Visible : Visibility.Collapsed;
+        DiagnosticsView.Visibility = showDiagnostics ? Visibility.Visible : Visibility.Collapsed;
     }
 
     private void OutputEndpointComboBox_SelectionChanged(object sender, SelectionChangedEventArgs e)
