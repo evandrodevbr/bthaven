@@ -163,12 +163,12 @@ public sealed class BluetoothDeviceManagerTests
             "Classic");
 
         await AssertPreferredNameAsync(
-            Observation("z-endpoint", BluetoothTransport.Classic, "id-case", null, isConnected: false) with
+            Observation("z-endpoint", BluetoothTransport.Classic, "id-case", null, isConnected: true) with
             {
                 Name = "Z endpoint",
                 ObservedAt = observedAt,
             },
-            Observation("a-endpoint", BluetoothTransport.Classic, "id-case", null, isConnected: false) with
+            Observation("a-endpoint", BluetoothTransport.Classic, "id-case", null, isConnected: true) with
             {
                 Name = "A endpoint",
                 ObservedAt = observedAt,
@@ -360,15 +360,16 @@ public sealed class BluetoothDeviceManagerTests
     public async Task Equal_names_without_identity_data_remain_separate_models()
     {
         await using var manager = new BluetoothDeviceManager();
-        var first = Observation("endpoint-a", BluetoothTransport.Classic, null, null) with { Name = "Phone" };
-        var second = Observation("endpoint-b", BluetoothTransport.LowEnergy, null, null) with { Name = "Phone" };
+        var first = Observation("endpoint-b", BluetoothTransport.Classic, null, null) with { Name = "Phone" };
+        var second = Observation("endpoint-a", BluetoothTransport.Classic, null, null) with { Name = "Phone" };
 
         manager.ApplyObservationForTesting(first);
         manager.ApplyObservationForTesting(second);
 
         var models = manager.GetModelsForTesting();
-        Assert.Equal(2, models.Count);
-        Assert.Equal(2, models.Select(model => model.Id).Distinct(StringComparer.OrdinalIgnoreCase).Count());
+        Assert.Equal(
+            ["endpoint:Classic:endpoint-a", "endpoint:Classic:endpoint-b"],
+            models.Select(model => model.Id));
         Assert.Equal(2, Enumerable.Range(0, 2).Select(_ => ReadChange(manager).Kind).Count(kind => kind == BluetoothDeviceChangeKind.Added));
     }
 

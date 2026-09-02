@@ -37,6 +37,7 @@ public sealed partial class MainPage
             .Where(device => BluetoothDeviceFilterMatcher.Matches(device, filter))
             .OrderByDescending(device => device.IsConnected)
             .ThenBy(device => device.Name, StringComparer.OrdinalIgnoreCase)
+            .ThenBy(device => device.Id, StringComparer.OrdinalIgnoreCase)
             .ToArray();
     }
 

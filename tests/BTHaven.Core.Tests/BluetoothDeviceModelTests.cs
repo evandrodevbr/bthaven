@@ -68,8 +68,8 @@ public sealed class BluetoothDeviceModelTests
 
         Assert.Equal("z-classic", selected!.Id);
         var idTieDevice = Device(
-            Endpoint("z-classic", BluetoothTransport.Classic, connected: false, present: true, observedAt),
-            Endpoint("a-classic", BluetoothTransport.Classic, connected: false, present: true, observedAt));
+            Endpoint("z-classic", BluetoothTransport.Classic, connected: true, present: true, observedAt),
+            Endpoint("a-classic", BluetoothTransport.Classic, connected: true, present: true, observedAt));
 
         Assert.Equal(
             "a-classic",

@@ -60,12 +60,9 @@ public sealed class BluetoothDeviceManager : IBluetoothDeviceService, IAsyncDisp
         IReadOnlyList<BluetoothDeviceModel> result;
         lock (sync)
         {
-            result = BuildModelsLocked()
-                .Values
-                .Where(device => BluetoothDeviceFilterMatcher.Matches(device, filter))
-                .OrderByDescending(device => device.IsConnected)
-                .ThenBy(device => device.Name, StringComparer.OrdinalIgnoreCase)
-                .ToArray();
+            result = OrderDevices(
+                BuildModelsLocked().Values
+                    .Where(device => BluetoothDeviceFilterMatcher.Matches(device, filter)));
         }
         logger.Info("Bluetooth.Snapshot.Completed", new Dictionary<string, object?>
         {
@@ -140,9 +137,16 @@ public sealed class BluetoothDeviceManager : IBluetoothDeviceService, IAsyncDisp
     {
         lock (sync)
         {
-            return BuildModelsLocked().Values.ToArray();
+            return OrderDevices(BuildModelsLocked().Values);
         }
     }
+
+    private static BluetoothDeviceModel[] OrderDevices(IEnumerable<BluetoothDeviceModel> devices) =>
+        devices
+            .OrderByDescending(device => device.IsConnected)
+            .ThenBy(device => device.Name, StringComparer.OrdinalIgnoreCase)
+            .ThenBy(device => device.Id, StringComparer.OrdinalIgnoreCase)
+            .ToArray();
 
     internal bool TryReadChangeForTesting(out BluetoothDeviceChange? change) =>
         changes.Reader.TryRead(out change);
