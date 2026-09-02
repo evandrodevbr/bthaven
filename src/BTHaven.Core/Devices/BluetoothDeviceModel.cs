@@ -39,10 +39,26 @@ public sealed record BluetoothEndpointReference
     public required BluetoothTransport Transport { get; init; }
     public string? ContainerId { get; init; }
     public string? Address { get; init; }
+    public bool? IsConnected { get; init; }
+    public bool? IsPresent { get; init; }
+    public DateTimeOffset ObservedAt { get; init; }
 }
 
 public static class BluetoothEndpointSelection
 {
+    public static BluetoothEndpointReference? SelectPreferredConnection(BluetoothDeviceModel device)
+    {
+        ArgumentNullException.ThrowIfNull(device);
+
+        return device.Endpoints
+            .OrderByDescending(endpoint => endpoint.IsConnected == true)
+            .ThenByDescending(endpoint => endpoint.IsPresent == true)
+            .ThenByDescending(endpoint => endpoint.ObservedAt)
+            .ThenBy(endpoint => endpoint.Transport)
+            .ThenBy(endpoint => endpoint.Id, StringComparer.OrdinalIgnoreCase)
+            .FirstOrDefault();
+    }
+
     public static BluetoothEndpointReference? SelectGatt(BluetoothDeviceModel device)
     {
         ArgumentNullException.ThrowIfNull(device);

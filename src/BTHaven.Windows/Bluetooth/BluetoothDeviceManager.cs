@@ -597,6 +597,13 @@ public sealed class BluetoothDeviceManager : IBluetoothDeviceService, IAsyncDisp
             .OrderBy(item => item.Transport)
             .ThenBy(item => item.Id, StringComparer.OrdinalIgnoreCase)
             .ToArray();
+        var preferredItems = items
+            .OrderByDescending(item => item.IsConnected == true)
+            .ThenByDescending(item => item.IsPresent == true)
+            .ThenByDescending(item => item.ObservedAt)
+            .ThenBy(item => item.Transport)
+            .ThenBy(item => item.Id, StringComparer.OrdinalIgnoreCase)
+            .ToArray();
         var hasClassic = items.Any(item => item.Transport is BluetoothTransport.Classic or BluetoothTransport.DualMode);
         var hasBle = items.Any(item => item.Transport is BluetoothTransport.LowEnergy or BluetoothTransport.DualMode);
         var transport = hasClassic && hasBle
@@ -619,17 +626,17 @@ public sealed class BluetoothDeviceManager : IBluetoothDeviceService, IAsyncDisp
         return new BluetoothDeviceModel
         {
             Id = logicalKey,
-            ContainerId = items.Select(item => item.ContainerId).FirstOrDefault(value => !string.IsNullOrWhiteSpace(value)),
-            Name = items.Select(item => item.Name).FirstOrDefault(value => !string.IsNullOrWhiteSpace(value)) ?? "Bluetooth device",
-            Manufacturer = items.Select(item => item.Manufacturer).FirstOrDefault(value => !string.IsNullOrWhiteSpace(value)),
-            Model = items.Select(item => item.Model).FirstOrDefault(value => !string.IsNullOrWhiteSpace(value)),
-            Address = items.Select(item => item.Address).FirstOrDefault(value => !string.IsNullOrWhiteSpace(value)),
+            ContainerId = preferredItems.Select(item => item.ContainerId).FirstOrDefault(value => !string.IsNullOrWhiteSpace(value)),
+            Name = preferredItems.Select(item => item.Name).FirstOrDefault(value => !string.IsNullOrWhiteSpace(value)) ?? "Bluetooth device",
+            Manufacturer = preferredItems.Select(item => item.Manufacturer).FirstOrDefault(value => !string.IsNullOrWhiteSpace(value)),
+            Model = preferredItems.Select(item => item.Model).FirstOrDefault(value => !string.IsNullOrWhiteSpace(value)),
+            Address = preferredItems.Select(item => item.Address).FirstOrDefault(value => !string.IsNullOrWhiteSpace(value)),
             Transport = transport,
-            Category = items.Select(item => item.Category).FirstOrDefault(value => value != BluetoothDeviceCategory.Unknown),
+            Category = preferredItems.Select(item => item.Category).FirstOrDefault(value => value != BluetoothDeviceCategory.Unknown),
             IsPaired = items.Any(item => item.IsPaired == true),
             IsConnected = items.Any(item => item.IsConnected == true),
             IsPresent = items.Any(item => item.IsPresent == true),
-            Rssi = items.Select(item => item.Rssi).FirstOrDefault(value => value.HasValue),
+            Rssi = preferredItems.Select(item => item.Rssi).FirstOrDefault(value => value.HasValue),
             Capabilities = capabilities,
             Endpoints = items
                 .Select(item => new BluetoothEndpointReference
@@ -638,6 +645,9 @@ public sealed class BluetoothDeviceManager : IBluetoothDeviceService, IAsyncDisp
                     Transport = item.Transport,
                     ContainerId = item.ContainerId,
                     Address = item.Address,
+                    IsConnected = item.IsConnected,
+                    IsPresent = item.IsPresent,
+                    ObservedAt = item.ObservedAt,
                 })
                 .ToArray(),
             Services = items.SelectMany(item => item.Services).Distinct(StringComparer.OrdinalIgnoreCase).OrderBy(value => value).ToArray(),

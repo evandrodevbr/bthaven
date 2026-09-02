@@ -60,6 +60,123 @@ public sealed class BluetoothDeviceManagerTests
     }
 
     [Fact]
+    public async Task Connected_observation_supplies_scalar_fields_without_changing_aggregate_state()
+    {
+        await using var manager = new BluetoothDeviceManager();
+        var observedAt = DateTimeOffset.Parse("2026-09-01T12:00:00Z");
+        var disconnectedClassic = Observation(
+            "classic-endpoint",
+            BluetoothTransport.Classic,
+            "container-01",
+            "00:11:22:33:44:55",
+            isPaired: true,
+            isConnected: false,
+            capabilities: BluetoothCapabilities.Classic) with
+        {
+            Name = "Stale classic name",
+            Manufacturer = "Stale vendor",
+            Model = "Stale model",
+            Category = BluetoothDeviceCategory.Other,
+            ObservedAt = observedAt.AddMinutes(1),
+        };
+        var connectedBle = Observation(
+            "ble-endpoint",
+            BluetoothTransport.LowEnergy,
+            "container-01",
+            "AA:BB:CC:DD:EE:FF",
+            isPaired: false,
+            isConnected: true,
+            capabilities: BluetoothCapabilities.Ble) with
+        {
+            Name = "Connected phone",
+            Manufacturer = "Connected vendor",
+            Model = "Connected model",
+            Category = BluetoothDeviceCategory.Smartphone,
+            ObservedAt = observedAt,
+        };
+
+        manager.ApplyObservationForTesting(disconnectedClassic);
+        manager.ApplyObservationForTesting(connectedBle);
+
+        var model = Assert.Single(manager.GetModelsForTesting());
+        Assert.Equal("Connected phone", model.Name);
+        Assert.Equal("Connected vendor", model.Manufacturer);
+        Assert.Equal("Connected model", model.Model);
+        Assert.Equal("AA:BB:CC:DD:EE:FF", model.Address);
+        Assert.Equal(BluetoothDeviceCategory.Smartphone, model.Category);
+        Assert.Equal(BluetoothTransport.DualMode, model.Transport);
+        Assert.True(model.IsPaired);
+        Assert.True(model.IsConnected);
+        Assert.True(model.IsPresent);
+        Assert.Equal(BluetoothCapabilities.Classic | BluetoothCapabilities.Ble, model.Capabilities);
+        Assert.Contains(model.Endpoints, endpoint =>
+            endpoint.Id == connectedBle.Id
+            && endpoint.IsConnected == true
+            && endpoint.IsPresent == true
+            && endpoint.ObservedAt == observedAt);
+    }
+
+    [Fact]
+    public async Task Scalar_provenance_uses_present_newest_transport_and_endpoint_id_ties()
+    {
+        var observedAt = DateTimeOffset.Parse("2026-09-01T12:00:00Z");
+
+        await AssertPreferredNameAsync(
+            Observation("absent", BluetoothTransport.Classic, "present-case", null, isConnected: false) with
+            {
+                Name = "Absent newer",
+                IsPresent = false,
+                ObservedAt = observedAt.AddMinutes(1),
+            },
+            Observation("present", BluetoothTransport.LowEnergy, "present-case", null, isConnected: false) with
+            {
+                Name = "Present older",
+                IsPresent = true,
+                ObservedAt = observedAt,
+            },
+            "Present older");
+
+        await AssertPreferredNameAsync(
+            Observation("older", BluetoothTransport.Classic, "newest-case", null, isConnected: false) with
+            {
+                Name = "Older",
+                ObservedAt = observedAt,
+            },
+            Observation("newer", BluetoothTransport.LowEnergy, "newest-case", null, isConnected: false) with
+            {
+                Name = "Newer",
+                ObservedAt = observedAt.AddMinutes(1),
+            },
+            "Newer");
+
+        await AssertPreferredNameAsync(
+            Observation("ble", BluetoothTransport.LowEnergy, "transport-case", null, isConnected: false) with
+            {
+                Name = "Low energy",
+                ObservedAt = observedAt,
+            },
+            Observation("classic", BluetoothTransport.Classic, "transport-case", null, isConnected: false) with
+            {
+                Name = "Classic",
+                ObservedAt = observedAt,
+            },
+            "Classic");
+
+        await AssertPreferredNameAsync(
+            Observation("z-endpoint", BluetoothTransport.Classic, "id-case", null, isConnected: false) with
+            {
+                Name = "Z endpoint",
+                ObservedAt = observedAt,
+            },
+            Observation("a-endpoint", BluetoothTransport.Classic, "id-case", null, isConnected: false) with
+            {
+                Name = "A endpoint",
+                ObservedAt = observedAt,
+            },
+            "A endpoint");
+    }
+
+    [Fact]
     public async Task Partial_removal_emits_updated_with_same_logical_id_and_one_remaining_line()
     {
         await using var manager = new BluetoothDeviceManager();
@@ -253,6 +370,18 @@ public sealed class BluetoothDeviceManagerTests
         Assert.Equal(2, models.Count);
         Assert.Equal(2, models.Select(model => model.Id).Distinct(StringComparer.OrdinalIgnoreCase).Count());
         Assert.Equal(2, Enumerable.Range(0, 2).Select(_ => ReadChange(manager).Kind).Count(kind => kind == BluetoothDeviceChangeKind.Added));
+    }
+
+    private static async Task AssertPreferredNameAsync(
+        BluetoothDeviceObservation first,
+        BluetoothDeviceObservation second,
+        string expectedName)
+    {
+        await using var manager = new BluetoothDeviceManager();
+        manager.ApplyObservationForTesting(first);
+        manager.ApplyObservationForTesting(second);
+
+        Assert.Equal(expectedName, Assert.Single(manager.GetModelsForTesting()).Name);
     }
 
     private static BluetoothDeviceObservation Observation(
