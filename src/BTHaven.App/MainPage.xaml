@@ -20,8 +20,78 @@
         </Style>
     </Page.Resources>
 
-    <Grid Padding="28,20,28,28" RowDefinitions="Auto,Auto,*" RowSpacing="16">
-        <Grid x:Name="ProductHeader" Grid.Row="0" ColumnDefinitions="*,Auto" ColumnSpacing="16">
+    <Grid x:Name="WorkspaceRoot"
+          Padding="28,20,28,28"
+          RowDefinitions="Auto,Auto,*"
+          RowSpacing="16">
+        <VisualStateManager.VisualStateGroups>
+            <VisualStateGroup x:Name="LayoutStates"
+                              CurrentStateChanged="LayoutStates_CurrentStateChanged">
+                <VisualState x:Name="WideState">
+                    <VisualState.StateTriggers>
+                        <AdaptiveTrigger MinWindowWidth="1100" />
+                    </VisualState.StateTriggers>
+                    <VisualState.Setters>
+                        <Setter Target="DevicePane.Visibility" Value="Visible" />
+                        <Setter Target="SelectedDevicePane.Visibility" Value="Visible" />
+                    </VisualState.Setters>
+                </VisualState>
+                <VisualState x:Name="MediumState">
+                    <VisualState.StateTriggers>
+                        <AdaptiveTrigger MinWindowWidth="720" />
+                    </VisualState.StateTriggers>
+                    <VisualState.Setters>
+                        <Setter Target="WorkspaceRoot.Padding" Value="18,16,18,20" />
+                        <Setter Target="WorkspaceRoot.RowSpacing" Value="12" />
+                        <Setter Target="DevicePaneColumn.Width" Value="280" />
+                        <Setter Target="MasterDetailRegion.ColumnSpacing" Value="12" />
+                        <Setter Target="DevicePane.Visibility" Value="Visible" />
+                        <Setter Target="SelectedDevicePane.Visibility" Value="Visible" />
+                        <Setter Target="DevicePaneHeader.Padding" Value="14,14,14,6" />
+                        <Setter Target="DeviceFilterHeader.Padding" Value="8,0,6,8" />
+                        <Setter Target="DeviceList.Margin" Value="4,0,4,4" />
+                        <Setter Target="SelectedDeviceHeader.Padding" Value="18,16,18,6" />
+                        <Setter Target="DetailSelectorBar.Margin" Value="10,0,10,4" />
+                        <Setter Target="SummaryContent.Padding" Value="18,8,18,20" />
+                        <Setter Target="AudioContent.Padding" Value="18,8,18,20" />
+                        <Setter Target="DiagnosticsContent.Padding" Value="18,8,18,20" />
+                    </VisualState.Setters>
+                </VisualState>
+                <VisualState x:Name="CompactState">
+                    <VisualState.StateTriggers>
+                        <AdaptiveTrigger MinWindowWidth="0" />
+                    </VisualState.StateTriggers>
+                    <VisualState.Setters>
+                        <Setter Target="WorkspaceRoot.Padding" Value="12,12,12,16" />
+                        <Setter Target="WorkspaceRoot.RowSpacing" Value="10" />
+                        <Setter Target="ProductHeader.ColumnSpacing" Value="0" />
+                        <Setter Target="GlobalCommandBar.(Grid.Row)" Value="1" />
+                        <Setter Target="GlobalCommandBar.(Grid.Column)" Value="0" />
+                        <Setter Target="GlobalCommandBar.(Grid.ColumnSpan)" Value="2" />
+                        <Setter Target="GlobalCommandBar.HorizontalAlignment" Value="Stretch" />
+                        <Setter Target="DevicePaneColumn.Width" Value="*" />
+                        <Setter Target="DetailPaneColumn.Width" Value="0" />
+                        <Setter Target="MasterDetailRegion.ColumnSpacing" Value="0" />
+                        <Setter Target="SelectedDevicePane.(Grid.Column)" Value="0" />
+                        <Setter Target="CompactBackButton.Visibility" Value="Visible" />
+                        <Setter Target="DevicePaneHeader.Padding" Value="14,14,14,6" />
+                        <Setter Target="DeviceFilterHeader.Padding" Value="8,0,6,8" />
+                        <Setter Target="DeviceList.Margin" Value="4,0,4,4" />
+                        <Setter Target="SelectedDeviceHeader.Padding" Value="16,14,16,6" />
+                        <Setter Target="DetailSelectorBar.Margin" Value="8,0,8,4" />
+                        <Setter Target="SummaryContent.Padding" Value="16,8,16,20" />
+                        <Setter Target="AudioContent.Padding" Value="16,8,16,20" />
+                        <Setter Target="DiagnosticsContent.Padding" Value="16,8,16,20" />
+                    </VisualState.Setters>
+                </VisualState>
+            </VisualStateGroup>
+        </VisualStateManager.VisualStateGroups>
+
+        <Grid x:Name="ProductHeader"
+              Grid.Row="0"
+              ColumnDefinitions="*,Auto"
+              RowDefinitions="Auto,Auto"
+              ColumnSpacing="16">
             <StackPanel Spacing="4" VerticalAlignment="Center">
                 <TextBlock Text="Bluetooth Hub"
                            Style="{StaticResource TitleTextBlockStyle}"
@@ -54,8 +124,11 @@
 
         <Grid x:Name="MasterDetailRegion"
               Grid.Row="2"
-              ColumnDefinitions="320,*"
               ColumnSpacing="18">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition x:Name="DevicePaneColumn" Width="320" />
+                <ColumnDefinition x:Name="DetailPaneColumn" Width="*" />
+            </Grid.ColumnDefinitions>
             <Border x:Name="DevicePane"
                     Grid.Column="0"
                     Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
@@ -63,7 +136,9 @@
                     BorderThickness="1"
                     CornerRadius="12">
                 <Grid RowDefinitions="Auto,Auto,*">
-                    <Grid Padding="18,16,18,8" ColumnDefinitions="*,Auto">
+                    <Grid x:Name="DevicePaneHeader"
+                          Padding="18,16,18,8"
+                          ColumnDefinitions="*,Auto">
                         <TextBlock Text="Dispositivos"
                                    FontSize="18"
                                    FontWeight="SemiBold"
@@ -73,7 +148,11 @@
                                    Style="{StaticResource CaptionText}"
                                    VerticalAlignment="Center" />
                     </Grid>
-                    <Grid Grid.Row="1" Padding="12,0,8,10" ColumnDefinitions="*,Auto" ColumnSpacing="8">
+                    <Grid x:Name="DeviceFilterHeader"
+                          Grid.Row="1"
+                          Padding="12,0,8,10"
+                          ColumnDefinitions="*,Auto"
+                          ColumnSpacing="8">
                         <ComboBox x:Name="FilterComboBox"
                                   Header="Filtrar dispositivos"
                                   HorizontalAlignment="Stretch"
@@ -104,7 +183,9 @@
                         <ListView x:Name="DeviceList"
                                   Margin="6,0,6,6"
                                   SelectionMode="Single"
+                                  IsItemClickEnabled="True"
                                   SelectionChanged="DeviceList_SelectionChanged"
+                                  ItemClick="DeviceList_ItemClick"
                                   AutomationProperties.Name="Dispositivos Bluetooth">
                             <ListView.ItemTemplate>
                                 <DataTemplate>
@@ -163,7 +244,22 @@
                     BorderThickness="1"
                     CornerRadius="12">
                 <Grid RowDefinitions="Auto,Auto,*">
-                    <StackPanel Padding="24,20,24,8" Spacing="6">
+                    <StackPanel x:Name="SelectedDeviceHeader"
+                                Padding="24,20,24,8"
+                                Spacing="6">
+                        <Button x:Name="CompactBackButton"
+                                Visibility="Collapsed"
+                                Click="CompactBackButton_Click"
+                                HorizontalAlignment="Left"
+                                AutomationProperties.Name="Voltar à lista de dispositivos">
+                            <Button.KeyboardAccelerators>
+                                <KeyboardAccelerator Key="Escape" />
+                            </Button.KeyboardAccelerators>
+                            <StackPanel Orientation="Horizontal" Spacing="8">
+                                <FontIcon Glyph="&#xE72B;" FontSize="14" />
+                                <TextBlock Text="Voltar" />
+                            </StackPanel>
+                        </Button>
                         <TextBlock x:Name="SelectedDeviceName"
                                    Text="Selecione um dispositivo"
                                    FontSize="26"
@@ -174,19 +270,25 @@
                                    Text="A lista usa observações do Windows, não polling agressivo."
                                    Opacity="0.72"
                                    TextWrapping="Wrap" />
-                        <Grid ColumnDefinitions="Auto,*,Auto,*" ColumnSpacing="8" RowSpacing="4">
-                            <TextBlock Text="Estado" Style="{StaticResource CaptionText}" VerticalAlignment="Center" />
+                        <Grid ColumnDefinitions="Auto,*"
+                              RowDefinitions="Auto,Auto"
+                              ColumnSpacing="8"
+                              RowSpacing="4">
+                            <TextBlock Text="Estado"
+                                       Style="{StaticResource CaptionText}"
+                                       VerticalAlignment="Center" />
                             <TextBlock x:Name="ConnectionStateText"
                                        Grid.Column="1"
                                        Text="—"
                                        TextWrapping="Wrap"
                                        VerticalAlignment="Center" />
-                            <TextBlock Grid.Column="2"
+                            <TextBlock Grid.Row="1"
                                        Text="Endpoint preferido"
                                        Style="{StaticResource CaptionText}"
                                        VerticalAlignment="Center" />
                             <TextBlock x:Name="ConnectionTransportText"
-                                       Grid.Column="3"
+                                       Grid.Row="1"
+                                       Grid.Column="1"
                                        Text="—"
                                        TextWrapping="Wrap"
                                        VerticalAlignment="Center" />
@@ -207,7 +309,9 @@
                         <ScrollViewer x:Name="SummaryView"
                                       VerticalScrollBarVisibility="Auto"
                                       HorizontalScrollBarVisibility="Disabled">
-                            <StackPanel Padding="24,8,24,24" Spacing="8">
+                            <StackPanel x:Name="SummaryContent"
+                                        Padding="24,8,24,24"
+                                        Spacing="8">
                                 <TextBlock Text="Conexão" Style="{StaticResource SectionHeading}" />
                                 <Grid ColumnDefinitions="160,*" RowDefinitions="Auto,Auto,Auto,Auto,Auto" RowSpacing="6">
                                     <TextBlock Text="Transporte agregado" Style="{StaticResource CaptionText}" />
@@ -245,7 +349,9 @@
                                       Visibility="Collapsed"
                                       VerticalScrollBarVisibility="Auto"
                                       HorizontalScrollBarVisibility="Disabled">
-                            <StackPanel Padding="24,8,24,24" Spacing="8">
+                            <StackPanel x:Name="AudioContent"
+                                        Padding="24,8,24,24"
+                                        Spacing="8">
                                 <TextBlock Text="Áudio de mídia" Style="{StaticResource SectionHeading}" />
                                 <TextBlock Text="O Windows pode transformar o PC em um destino A2DP usando AudioPlaybackConnection. O telefone precisa enviar a mídia para o PC; o Windows reproduz no endpoint padrão."
                                            TextWrapping="Wrap"
@@ -325,19 +431,22 @@
                                       Visibility="Collapsed"
                                       VerticalScrollBarVisibility="Auto"
                                       HorizontalScrollBarVisibility="Disabled">
-                            <StackPanel Padding="24,8,24,24" Spacing="8">
+                            <StackPanel x:Name="DiagnosticsContent"
+                                        Padding="24,8,24,24"
+                                        Spacing="8">
                                 <TextBlock Text="Inspeção detalhada" Style="{StaticResource SectionHeading}" />
-                                <StackPanel Orientation="Horizontal" Spacing="10">
+                                <Grid ColumnDefinitions="Auto,*" ColumnSpacing="10">
                                     <Button x:Name="InspectButton"
                                             Content="Inspecionar tudo"
                                             Click="InspectButton_Click"
                                             IsEnabled="False" />
                                     <TextBlock x:Name="InspectionStatusText"
+                                               Grid.Column="1"
                                                Text="Nenhuma inspeção executada"
                                                Style="{StaticResource CaptionText}"
                                                VerticalAlignment="Center"
                                                TextWrapping="Wrap" />
-                                </StackPanel>
+                                </Grid>
                                 <TextBox x:Name="InspectionTextBox"
                                          Text="Selecione um dispositivo e execute a inspeção detalhada."
                                          IsReadOnly="True"

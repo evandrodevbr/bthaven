@@ -41,6 +41,7 @@ public sealed partial class MainPage : Page
     private bool suppressMediaToggleEvents;
     private bool loaded;
     private bool ready;
+    private bool isCompactLayout;
     private bool disposed;
     private readonly Dictionary<string, string> a2dpLogicalDeviceIds = new(StringComparer.OrdinalIgnoreCase);
     private readonly ConcurrentDictionary<string, byte> invalidatedA2dpDeviceIds = new(StringComparer.OrdinalIgnoreCase);
@@ -549,6 +550,9 @@ public sealed partial class MainPage : Page
         SetSelectedDevice(device.Id);
     }
 
+    private void DeviceList_ItemClick(object sender, ItemClickEventArgs e) =>
+        ShowCompactDeviceDetails(moveFocus: true);
+
     private async Task RefreshSelectedDeviceCapabilitiesAsync(string deviceId, long epoch)
     {
         try
@@ -1024,6 +1028,59 @@ public sealed partial class MainPage : Page
                 && selectedDeviceId is not null
                 && devices.TryGetValue(selectedDeviceId, out var currentDevice)
                 && currentDevice.Category == BluetoothDeviceCategory.Smartphone;
+        }
+    }
+
+    private void LayoutStates_CurrentStateChanged(
+        object sender,
+        VisualStateChangedEventArgs args)
+    {
+        isCompactLayout = ReferenceEquals(args.NewState, CompactState);
+        if (!isCompactLayout)
+        {
+            return;
+        }
+
+        if (selectedDeviceId is null)
+        {
+            ShowCompactDeviceList(moveFocus: false);
+        }
+        else
+        {
+            ShowCompactDeviceDetails(moveFocus: false);
+        }
+    }
+
+    private void CompactBackButton_Click(object sender, RoutedEventArgs e) =>
+        ShowCompactDeviceList(moveFocus: true);
+
+    private void ShowCompactDeviceList(bool moveFocus)
+    {
+        if (!isCompactLayout)
+        {
+            return;
+        }
+
+        DevicePane.Visibility = Visibility.Visible;
+        SelectedDevicePane.Visibility = Visibility.Collapsed;
+        if (moveFocus)
+        {
+            DeviceList.Focus(FocusState.Programmatic);
+        }
+    }
+
+    private void ShowCompactDeviceDetails(bool moveFocus)
+    {
+        if (!isCompactLayout || selectedDeviceId is null)
+        {
+            return;
+        }
+
+        DevicePane.Visibility = Visibility.Collapsed;
+        SelectedDevicePane.Visibility = Visibility.Visible;
+        if (moveFocus)
+        {
+            (DetailSelectorBar.SelectedItem ?? SummarySelectorItem).Focus(FocusState.Programmatic);
         }
     }
 
