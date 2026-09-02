@@ -141,6 +141,34 @@ public sealed class BatteryTelemetryCoordinator
         }
     }
 
+    public void Invalidate(string deviceId)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(deviceId);
+        BatteryTelemetryEntry? invalidated = null;
+
+        lock (gate)
+        {
+            generations[deviceId] = generations.GetValueOrDefault(deviceId) + 1;
+            if (entries.TryGetValue(deviceId, out var current))
+            {
+                var lastAvailable = current.LastAvailable
+                    ?? (current.Status == BatteryTelemetryStatus.Available ? current.Current : null);
+                invalidated = current with
+                {
+                    Status = BatteryTelemetryStatus.Unavailable,
+                    Current = null,
+                    LastAvailable = lastAvailable,
+                };
+                entries[deviceId] = invalidated;
+            }
+        }
+
+        if (invalidated is not null)
+        {
+            OnChanged(invalidated);
+        }
+    }
+
     private RefreshWork[] Prepare(IReadOnlyList<BluetoothDeviceModel> devices)
     {
         var attemptedAt = DateTimeOffset.UtcNow;

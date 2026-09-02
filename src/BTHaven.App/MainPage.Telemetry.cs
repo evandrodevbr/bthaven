@@ -13,16 +13,18 @@ public sealed partial class MainPage
         var entry = e.Entry;
         if (!DispatcherQueue.TryEnqueue(() =>
             {
-                if (disposed || !devices.ContainsKey(entry.DeviceId))
+                if (disposed
+                    || !devices.ContainsKey(entry.DeviceId)
+                    || !batteryTelemetry.TryGet(entry.DeviceId, out var latest))
                 {
                     return;
                 }
 
                 var epoch = selectionEpoch;
                 RefreshRows();
-                if (IsCurrentSelection(entry.DeviceId, epoch))
+                if (IsCurrentSelection(latest.DeviceId, epoch))
                 {
-                    RenderSelectedTelemetry(entry);
+                    RenderSelectedTelemetry(latest);
                 }
             }))
         {

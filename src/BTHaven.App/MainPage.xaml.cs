@@ -339,14 +339,16 @@ public sealed partial class MainPage : Page
         {
             devices.TryGetValue(change.DeviceId, out var previousDevice);
             devices[change.DeviceId] = change.Device;
-            replaceInFlightTelemetry = previousDevice is not null
-                && ((!previousDevice.IsConnected && change.Device.IsConnected)
-                    || !HasSameEndpointSet(previousDevice, change.Device));
-            refreshChangedDeviceTelemetry = previousDevice is null || replaceInFlightTelemetry;
-            selectedDeviceUpdated = SameId(selectedDeviceId, change.DeviceId);
-            selectedConnectionChanged = selectedDeviceUpdated
-                && previousDevice is not null
+            var connectionProvenanceChanged = previousDevice is not null
                 && !HasSameConnectionProvenance(previousDevice, change.Device);
+            replaceInFlightTelemetry = connectionProvenanceChanged;
+            refreshChangedDeviceTelemetry = previousDevice is null || connectionProvenanceChanged;
+            selectedDeviceUpdated = SameId(selectedDeviceId, change.DeviceId);
+            selectedConnectionChanged = selectedDeviceUpdated && connectionProvenanceChanged;
+            if (connectionProvenanceChanged)
+            {
+                batteryTelemetry.Invalidate(change.Device.Id);
+            }
             if (selectedConnectionChanged)
             {
                 selectionEpoch++;

@@ -181,6 +181,28 @@ public sealed class BatteryTelemetryCoordinatorTests
     }
 
     [Fact]
+    public async Task Invalidate_retains_last_available_and_rejects_inflight_result()
+    {
+        var service = new ControlledBatteryService();
+        var coordinator = new BatteryTelemetryCoordinator(service);
+        var availableRefresh = coordinator.RefreshAsync([Device("phone")], priorityDeviceId: "phone");
+        await service.WaitForStartsAsync(1);
+        service.Complete("phone", occurrence: 0, Available(80));
+        await availableRefresh;
+
+        var staleRefresh = coordinator.RefreshAsync([Device("phone")], priorityDeviceId: "phone");
+        await service.WaitForStartsAsync(2);
+        coordinator.Invalidate("phone");
+        service.Complete("phone", occurrence: 1, Available(10));
+        await staleRefresh;
+
+        Assert.True(coordinator.TryGet("phone", out var entry));
+        Assert.Equal(BatteryTelemetryStatus.Unavailable, entry.Status);
+        Assert.Null(entry.Current);
+        Assert.Equal(80, entry.LastAvailable?.Percentage);
+    }
+
+    [Fact]
     public async Task Cancellation_restores_previous_available_entry()
     {
         var service = new ControlledBatteryService();
