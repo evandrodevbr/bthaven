@@ -61,6 +61,14 @@ public sealed partial class MainPage
         }
 
         AssertSelectionInvariant();
+
+        // SynchronizeRows recria as linhas; sem isso, cada update de dispositivo ou
+        // telemetria jogaria a lista para o topo e faria o item selecionado sair da
+        // viewport.
+        if (DeviceList.SelectedItem is not null)
+        {
+            DeviceList.ScrollIntoView(DeviceList.SelectedItem);
+        }
     }
 
     private void SynchronizeRows(IReadOnlyList<BluetoothDeviceModel> visible)
