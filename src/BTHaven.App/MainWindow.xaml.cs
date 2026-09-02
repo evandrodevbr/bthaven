@@ -51,19 +51,31 @@ public sealed partial class MainWindow : Window
     private void TrayOpen_Click(object sender, RoutedEventArgs e)
     {
         logger.Info("App.Tray.OpenClicked");
-        AppWindow.Show();
-        Activate();
+        ShowFromTray();
     }
 
     private async void TrayDiagnostics_Click(object sender, RoutedEventArgs e)
     {
         logger.Info("App.Tray.DiagnosticsClicked");
-        AppWindow.Show();
-        Activate();
+        ShowFromTray();
         if (RootFrame.Content is MainPage page)
         {
             await page.ShowDiagnosticsAsync();
         }
+    }
+
+    private void ShowFromTray()
+    {
+        // Activate() nao restaura janela minimizada; sem isso, "Abrir" pela bandeja
+        // parece nao fazer nada quando a janela foi minimizada em vez de escondida.
+        if (AppWindow.Presenter is OverlappedPresenter presenter
+            && presenter.State == OverlappedPresenterState.Minimized)
+        {
+            presenter.Restore();
+        }
+
+        AppWindow.Show();
+        Activate();
     }
 
     private void TrayExit_Click(object sender, RoutedEventArgs e)
