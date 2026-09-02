@@ -21,13 +21,14 @@ public sealed partial class MainPage
             StatusInfoBar.Message = "Selecione um dispositivo antes de iniciar a inspeção.";
             return;
         }
+        var epoch = selectionEpoch;
 
         InspectButton.IsEnabled = false;
         InspectionStatusText.Text = "Inspeção em andamento; GATT e RFCOMM podem demorar.";
         try
         {
             var snapshot = await deviceInspector.InspectAsync(device, lifetime.Token);
-            if (selectedDeviceId is null || !string.Equals(selectedDeviceId, device.Id, StringComparison.OrdinalIgnoreCase))
+            if (!IsCurrentSelection(device.Id, epoch))
             {
                 return;
             }
@@ -56,6 +57,10 @@ public sealed partial class MainPage
             {
                 ["deviceId"] = device.Id,
             });
+            if (!IsCurrentSelection(device.Id, epoch))
+            {
+                return;
+            }
             InspectionStatusText.Text = "Inspeção falhou; consulte Logs.";
             InspectionTextBox.Text = $"Falha na inspeção: {exception.Message}";
             StatusInfoBar.Severity = InfoBarSeverity.Error;
@@ -146,15 +151,7 @@ public sealed partial class MainPage
         }
         finally
         {
-            suppressMediaToggleEvents = true;
-            try
-            {
-                RefreshRows();
-            }
-            finally
-            {
-                suppressMediaToggleEvents = false;
-            }
+            RefreshRows();
         }
     }
 
@@ -175,11 +172,16 @@ public sealed partial class MainPage
             StatusInfoBar.Message = "O Windows não expôs um controlador oficial de volume remoto para este smartphone.";
             return;
         }
+        var epoch = selectionEpoch;
 
         RemoteVolumeButton.IsEnabled = false;
         try
         {
             var status = await remoteVolumeService.SetVolumeAsync(device, (float)RemoteVolumeSlider.Value, lifetime.Token);
+            if (!IsCurrentSelection(device.Id, epoch))
+            {
+                return;
+            }
             RenderRemoteVolumeStatus(status);
             StatusInfoBar.Severity = status.CanControl ? InfoBarSeverity.Success : InfoBarSeverity.Warning;
             StatusInfoBar.Message = status.Message ?? $"Volume remoto: {status.Availability}.";
@@ -191,8 +193,12 @@ public sealed partial class MainPage
         {
             logger.Error("App.RemoteVolumeButton.Failed", exception, new Dictionary<string, object?>
             {
-                ["deviceId"] = selectedDeviceId,
+                ["deviceId"] = device.Id,
             });
+            if (!IsCurrentSelection(device.Id, epoch))
+            {
+                return;
+            }
             StatusInfoBar.Severity = InfoBarSeverity.Error;
             StatusInfoBar.Message = "Falha ao alterar o volume remoto; consulte Logs.";
         }

@@ -49,6 +49,7 @@ public sealed partial class MainPage : Page
     public MainPage()
     {
         InitializeComponent();
+        preferredDeviceId = LoadPreferredDeviceId();
 
         logger = TraceDiagnosticLogger.Instance;
         deviceManager = new BluetoothDeviceManager(logger);
@@ -154,6 +155,10 @@ public sealed partial class MainPage : Page
         try
         {
             var currentDevices = await deviceManager.GetDevicesAsync(BluetoothDeviceFilter.All, lifetime.Token);
+            var previousSelectedDevice = selectedDeviceId is not null
+                && devices.TryGetValue(selectedDeviceId, out var previous)
+                    ? previous
+                    : null;
             devices.Clear();
             foreach (var device in currentDevices)
             {
@@ -166,17 +171,30 @@ public sealed partial class MainPage : Page
             {
                 a2dpLogicalDeviceIds.Remove(mapping);
             }
-            if (selectedDeviceId is not null && !devices.ContainsKey(selectedDeviceId))
-            {
-                selectedDeviceId = null;
-                DeviceList.SelectedItem = null;
-                ClearSelection();
-            }
             if (activeMediaDeviceId is not null && !devices.ContainsKey(activeMediaDeviceId))
             {
                 activeMediaDeviceId = null;
             }
+            var selectedConnectionChanged = previousSelectedDevice is not null
+                && devices.TryGetValue(previousSelectedDevice.Id, out var refreshedSelectedDevice)
+                && !HasSameConnectionProvenance(previousSelectedDevice, refreshedSelectedDevice);
+            if (selectedConnectionChanged)
+            {
+                selectionEpoch++;
+                selectedInspection = null;
+            }
             RefreshRows();
+            if (previousSelectedDevice is not null
+                && selectedDeviceId is not null
+                && SameId(previousSelectedDevice.Id, selectedDeviceId)
+                && devices.TryGetValue(selectedDeviceId, out var selectedDevice))
+            {
+                RenderSelection(selectedDevice);
+                if (selectedConnectionChanged)
+                {
+                    _ = RefreshSelectedDeviceCapabilitiesAsync(selectedDevice.Id, selectionEpoch);
+                }
+            }
 
             var renderEndpoints = await endpointManager.GetEndpointsAsync(AudioEndpointDirection.Render, lifetime.Token);
             OutputEndpointComboBox.ItemsSource = renderEndpoints;
@@ -268,18 +286,21 @@ public sealed partial class MainPage : Page
             ["paired"] = change.Device?.IsPaired,
             ["present"] = change.Device?.IsPresent,
         });
+
+        var selectedDeviceUpdated = false;
+        var selectedConnectionChanged = false;
         if (change.Kind == BluetoothDeviceChangeKind.Removed)
         {
             var selectedTargetMapsRemovedDevice = selectedA2dpDeviceId is not null
                 && a2dpLogicalDeviceIds.TryGetValue(selectedA2dpDeviceId, out var mappedDeviceId)
-                && string.Equals(mappedDeviceId, change.DeviceId, StringComparison.OrdinalIgnoreCase);
+                && SameId(mappedDeviceId, change.DeviceId);
             var selectedTargetIsRemovedEndpoint = selectedA2dpDeviceId is not null
                 && !string.IsNullOrWhiteSpace(change.EndpointId)
-                && string.Equals(selectedA2dpDeviceId, change.EndpointId, StringComparison.OrdinalIgnoreCase);
+                && SameId(selectedA2dpDeviceId, change.EndpointId);
 
             devices.Remove(change.DeviceId);
             foreach (var mapping in a2dpLogicalDeviceIds
-                         .Where(mapping => string.Equals(mapping.Value, change.DeviceId, StringComparison.OrdinalIgnoreCase))
+                         .Where(mapping => SameId(mapping.Value, change.DeviceId))
                          .Select(mapping => mapping.Key)
                          .ToArray())
             {
@@ -291,27 +312,33 @@ public sealed partial class MainPage : Page
                 MediaAudioButton.IsEnabled = false;
                 A2dpTargetText.Text = "Alvo A2DP removido; aguardando nova consulta";
             }
-            if (string.Equals(activeMediaDeviceId, change.DeviceId, StringComparison.OrdinalIgnoreCase))
+            if (SameId(activeMediaDeviceId, change.DeviceId))
             {
                 activeMediaDeviceId = null;
-            }
-            if (string.Equals(selectedDeviceId, change.DeviceId, StringComparison.OrdinalIgnoreCase))
-            {
-                selectedDeviceId = null;
-                ClearSelection();
             }
         }
         else if (change.Device is not null)
         {
+            devices.TryGetValue(change.DeviceId, out var previousDevice);
             devices[change.DeviceId] = change.Device;
-            if (string.Equals(selectedDeviceId, change.DeviceId, StringComparison.OrdinalIgnoreCase))
+            selectedDeviceUpdated = SameId(selectedDeviceId, change.DeviceId);
+            selectedConnectionChanged = selectedDeviceUpdated
+                && previousDevice is not null
+                && !HasSameConnectionProvenance(previousDevice, change.Device);
+            if (selectedConnectionChanged)
+            {
+                selectionEpoch++;
+                selectedInspection = null;
+            }
+
+            if (selectedDeviceUpdated)
             {
                 var selectedTargetIsUpdatedEndpoint = selectedA2dpDeviceId is not null
                     && !string.IsNullOrWhiteSpace(change.EndpointId)
-                    && string.Equals(selectedA2dpDeviceId, change.EndpointId, StringComparison.OrdinalIgnoreCase);
+                    && SameId(selectedA2dpDeviceId, change.EndpointId);
                 var selectedTargetMappingsChangedDevice = selectedA2dpDeviceId is not null
                     && a2dpLogicalDeviceIds.TryGetValue(selectedA2dpDeviceId, out var mappedDeviceId)
-                    && !string.Equals(mappedDeviceId, change.DeviceId, StringComparison.OrdinalIgnoreCase);
+                    && !SameId(mappedDeviceId, change.DeviceId);
                 if (selectedTargetIsUpdatedEndpoint || selectedTargetMappingsChangedDevice)
                 {
                     selectedA2dpDeviceId = null;
@@ -325,11 +352,21 @@ public sealed partial class MainPage : Page
                     HfpEnableButton.Content = "HFP disponível apenas para smartphones";
                     HfpTransportText.Text = "Transporte HFP: não aplicável a esta categoria";
                 }
-                RenderSelection(change.Device);
             }
         }
 
         RefreshRows();
+        if (selectedDeviceUpdated
+            && selectedDeviceId is not null
+            && SameId(selectedDeviceId, change.DeviceId)
+            && devices.TryGetValue(selectedDeviceId, out var selectedDevice))
+        {
+            RenderSelection(selectedDevice);
+            if (selectedConnectionChanged)
+            {
+                _ = RefreshSelectedDeviceCapabilitiesAsync(selectedDevice.Id, selectionEpoch);
+            }
+        }
     }
 
     private void A2dpService_StateChanged(MediaAudioSinkState state)
@@ -463,111 +500,60 @@ public sealed partial class MainPage : Page
         invalidatedA2dpDeviceIds.TryAdd(targetId, 0);
     }
 
-    private void RefreshRows()
+
+    private void DeviceList_SelectionChanged(object sender, SelectionChangedEventArgs e)
     {
-        var filter = GetSelectedFilter();
-        var visible = devices.Values
-            .Where(device => BluetoothDeviceFilterMatcher.Matches(device, filter))
-            .OrderByDescending(device => device.IsConnected)
-            .ThenBy(device => device.Name, StringComparer.OrdinalIgnoreCase)
-            .Select(device => new DeviceRowViewModel(
-                device,
-                string.Equals(activeMediaDeviceId, device.Id, StringComparison.OrdinalIgnoreCase)))
-            .ToArray();
-
-        suppressMediaToggleEvents = true;
-        try
+        if (isReconcilingSelection)
         {
-            Rows.Clear();
-            foreach (var row in visible)
-            {
-                Rows.Add(row);
-            }
-        }
-        finally
-        {
-            suppressMediaToggleEvents = false;
-        }
-
-        DeviceCountText.Text = visible.Length == 1 ? "1 dispositivo" : $"{visible.Length} dispositivos";
-        EmptyState.Visibility = visible.Length == 0 ? Visibility.Visible : Visibility.Collapsed;
-        logger.Debug("App.Rows.Refreshed", new Dictionary<string, object?>
-        {
-            ["filter"] = filter.ToString(),
-            ["visibleCount"] = visible.Length,
-            ["knownCount"] = devices.Count,
-        });
-
-        if (selectedDeviceId is not null)
-        {
-            DeviceList.SelectedItem = Rows.FirstOrDefault(row =>
-                string.Equals(row.Id, selectedDeviceId, StringComparison.OrdinalIgnoreCase));
-        }
-    }
-
-    private async void DeviceList_SelectionChanged(object sender, SelectionChangedEventArgs e)
-    {
-        var previousSelectedDeviceId = selectedDeviceId;
-        if (DeviceList.SelectedItem is not DeviceRowViewModel row || !devices.TryGetValue(row.Id, out var device))
-        {
-            logger.Info("App.Device.SelectionCleared");
-            selectedDeviceId = null;
-            ClearSelection();
             return;
         }
 
-        selectedDeviceId = device.Id;
-        if (!string.Equals(previousSelectedDeviceId, device.Id, StringComparison.OrdinalIgnoreCase))
+        if (DeviceList.SelectedItem is not DeviceRowViewModel row
+            || !devices.TryGetValue(row.Id, out var device))
         {
-            selectedInspection = null;
-            selectedA2dpDeviceId = null;
-            selectedHfpTransportId = null;
-            MediaAudioButton.IsEnabled = false;
-            MediaAudioButton.Content = "Consultando alvo A2DP...";
-            A2dpTargetText.Text = "Alvo A2DP: aguardando consulta";
-            HfpEnableButton.IsEnabled = false;
-            HfpEnableButton.Content = "Consultando transporte HFP...";
-            HfpTransportText.Text = "Transporte HFP: aguardando consulta";
-            RenderRemoteVolumeStatus(null);
+            RefreshRows();
+            return;
         }
-        logger.Info("App.Device.Selected", new Dictionary<string, object?>
-        {
-            ["deviceId"] = device.Id,
-            ["name"] = device.Name,
-            ["transport"] = device.Transport.ToString(),
-            ["connected"] = device.IsConnected,
-            ["paired"] = device.IsPaired,
-            ["present"] = device.IsPresent,
-        });
-        RenderSelection(device);
-        await RefreshSelectedDeviceCapabilitiesAsync(device);
+
+        preferredDeviceId = device.Id;
+        SavePreferredDeviceId(device.Id);
+        SetSelectedDevice(device.Id);
     }
 
-    private async Task RefreshSelectedDeviceCapabilitiesAsync(BluetoothDeviceModel device)
+    private async Task RefreshSelectedDeviceCapabilitiesAsync(string deviceId, long epoch)
     {
         try
         {
+            if (!IsCurrentSelection(deviceId, epoch)
+                || !devices.TryGetValue(deviceId, out var device))
+            {
+                return;
+            }
+
             logger.Info("App.DeviceCapabilities.Started", new Dictionary<string, object?>
             {
                 ["deviceId"] = device.Id,
                 ["name"] = device.Name,
             });
             var battery = await batteryService.GetBatteryAsync(device, lifetime.Token);
-            if (selectedDeviceId is null || !string.Equals(selectedDeviceId, device.Id, StringComparison.OrdinalIgnoreCase))
+            if (!IsCurrentSelection(deviceId, epoch)
+                || !devices.TryGetValue(deviceId, out device))
             {
                 return;
             }
 
-            var updated = device with { Battery = battery };
-            devices[device.Id] = updated;
-            RenderSelection(updated);
+            device = device with { Battery = battery };
+            devices[deviceId] = device;
+            RenderSelection(device);
             RefreshRows();
 
             var audioTargets = await a2dpService.GetAvailableDevicesAsync(lifetime.Token);
-            if (selectedDeviceId is null || !string.Equals(selectedDeviceId, device.Id, StringComparison.OrdinalIgnoreCase))
+            if (!IsCurrentSelection(deviceId, epoch)
+                || !devices.TryGetValue(deviceId, out device))
             {
                 return;
             }
+
             var matchingTargets = BluetoothDeviceCorrelation.FindMatches(device, audioTargets);
             if (matchingTargets.Length == 1
                 && !string.IsNullOrWhiteSpace(matchingTargets[0].Id)
@@ -592,10 +578,15 @@ public sealed partial class MainPage : Page
             if (device.Category == BluetoothDeviceCategory.Smartphone)
             {
                 hfpTargets = await hfpService.GetAvailableDevicesAsync(lifetime.Token);
-                if (selectedDeviceId is null || !string.Equals(selectedDeviceId, device.Id, StringComparison.OrdinalIgnoreCase))
+                if (!IsCurrentSelection(deviceId, epoch)
+                    || !devices.TryGetValue(deviceId, out device))
                 {
                     return;
                 }
+            }
+
+            if (device.Category == BluetoothDeviceCategory.Smartphone)
+            {
                 matchingHfpTargets = BluetoothDeviceCorrelation.FindMatches(device, hfpTargets);
                 selectedHfpTransportId = matchingHfpTargets.Length == 1 ? matchingHfpTargets[0].Id : null;
                 HfpEnableButton.IsEnabled = true;
@@ -629,15 +620,19 @@ public sealed partial class MainPage : Page
                 HfpStatusInfoBar.Message = "A ativação HFP só é suportada para dispositivos classificados como smartphone.";
             }
 
+            if (!devices.TryGetValue(deviceId, out device))
+            {
+                return;
+            }
             var remoteVolume = await remoteVolumeService.GetStatusAsync(device, lifetime.Token);
-            if (selectedDeviceId is null || !string.Equals(selectedDeviceId, device.Id, StringComparison.OrdinalIgnoreCase))
+            if (!IsCurrentSelection(deviceId, epoch))
             {
                 return;
             }
             RenderRemoteVolumeStatus(remoteVolume);
             logger.Info("App.DeviceCapabilities.Completed", new Dictionary<string, object?>
             {
-                ["deviceId"] = device.Id,
+                ["deviceId"] = deviceId,
                 ["batterySource"] = battery.Source,
                 ["batteryPercentage"] = battery.Percentage,
                 ["a2dpCandidates"] = audioTargets.Count,
@@ -651,11 +646,17 @@ public sealed partial class MainPage : Page
         }
         catch (Exception exception)
         {
+            devices.TryGetValue(deviceId, out var device);
             logger.Error("App.DeviceCapabilities.Failed", exception, new Dictionary<string, object?>
             {
-                ["deviceId"] = device.Id,
-                ["name"] = device.Name,
+                ["deviceId"] = deviceId,
+                ["name"] = device?.Name,
             });
+            if (!IsCurrentSelection(deviceId, epoch))
+            {
+                return;
+            }
+
             A2dpTargetText.Text = "Falha ao consultar o alvo A2DP; consulte Logs.";
             HfpTransportText.Text = "Falha ao consultar o transporte HFP; consulte Logs.";
             RemoteVolumeInfoBar.Severity = InfoBarSeverity.Error;
@@ -896,15 +897,18 @@ public sealed partial class MainPage : Page
 
     private async void HfpEnableButton_Click(object sender, RoutedEventArgs e)
     {
+        var requestedDeviceId = selectedDeviceId;
+        var requestedTransportId = selectedHfpTransportId;
+        var epoch = selectionEpoch;
         logger.Info("App.HFP.EnableButton.Clicked", new Dictionary<string, object?>
         {
-            ["deviceId"] = selectedDeviceId,
-            ["transportDeviceId"] = selectedHfpTransportId,
+            ["deviceId"] = requestedDeviceId,
+            ["transportDeviceId"] = requestedTransportId,
         });
         HfpEnableButton.IsEnabled = false;
         try
         {
-            if (selectedDeviceId is null || !devices.TryGetValue(selectedDeviceId, out var device))
+            if (requestedDeviceId is null || !devices.TryGetValue(requestedDeviceId, out var device))
             {
                 HfpStatusInfoBar.Severity = InfoBarSeverity.Warning;
                 HfpStatusInfoBar.Title = "Selecione um smartphone";
@@ -924,14 +928,25 @@ public sealed partial class MainPage : Page
                 return;
             }
 
-            if (selectedHfpTransportId is null)
+            if (requestedTransportId is null)
             {
                 var targets = await hfpService.GetAvailableDevicesAsync(lifetime.Token);
+                if (!IsCurrentSelection(device.Id, epoch)
+                    || !devices.TryGetValue(device.Id, out device))
+                {
+                    return;
+                }
+                if (device.Category != BluetoothDeviceCategory.Smartphone)
+                {
+                    return;
+                }
+
                 var matches = BluetoothDeviceCorrelation.FindMatches(device, targets);
-                selectedHfpTransportId = matches.Length == 1 ? matches[0].Id : null;
+                requestedTransportId = matches.Length == 1 ? matches[0].Id : null;
+                selectedHfpTransportId = requestedTransportId;
             }
 
-            if (selectedHfpTransportId is null)
+            if (requestedTransportId is null)
             {
                 HfpStatusInfoBar.Severity = InfoBarSeverity.Warning;
                 HfpStatusInfoBar.Title = "HFP não exposto para este dispositivo";
@@ -946,7 +961,11 @@ public sealed partial class MainPage : Page
             HfpStatusInfoBar.Severity = InfoBarSeverity.Informational;
             HfpStatusInfoBar.Title = "Solicitando acesso HFP";
             HfpStatusInfoBar.Message = "Solicitando a permissão documentada e tentando registrar o transporte...";
-            var result = await hfpService.ActivateAsync(selectedHfpTransportId, lifetime.Token);
+            var result = await hfpService.ActivateAsync(requestedTransportId, lifetime.Token);
+            if (!IsCurrentSelection(device.Id, epoch))
+            {
+                return;
+            }
             HfpStatusInfoBar.Severity = result.Succeeded ? InfoBarSeverity.Success : InfoBarSeverity.Warning;
             HfpStatusInfoBar.Title = result.Succeeded ? "HFP ativo" : $"HFP: {result.Status}";
             HfpStatusInfoBar.Message = result.Succeeded
@@ -956,7 +975,7 @@ public sealed partial class MainPage : Page
             logger.Info("App.HFP.EnableButton.Completed", new Dictionary<string, object?>
             {
                 ["deviceId"] = device.Id,
-                ["transportDeviceId"] = selectedHfpTransportId,
+                ["transportDeviceId"] = requestedTransportId,
                 ["status"] = result.Status,
                 ["succeeded"] = result.Succeeded,
                 ["accessStatus"] = result.AccessStatus,
@@ -972,9 +991,13 @@ public sealed partial class MainPage : Page
         {
             logger.Error("App.HFP.EnableButton.Failed", exception, new Dictionary<string, object?>
             {
-                ["deviceId"] = selectedDeviceId,
-                ["transportDeviceId"] = selectedHfpTransportId,
+                ["deviceId"] = requestedDeviceId,
+                ["transportDeviceId"] = requestedTransportId,
             });
+            if (requestedDeviceId is null || !IsCurrentSelection(requestedDeviceId, epoch))
+            {
+                return;
+            }
             HfpStatusInfoBar.Severity = InfoBarSeverity.Error;
             HfpStatusInfoBar.Title = "Falha ao ativar HFP";
             HfpStatusInfoBar.Message = "A ativação falhou; o HRESULT e a stack trace foram gravados nos Logs.";
