@@ -136,7 +136,7 @@ public sealed class BatteryTelemetryCoordinator
             foreach (var deviceId in entries.Keys.Where(id => !validIds.Contains(id)).ToArray())
             {
                 entries.Remove(deviceId);
-                generations.Remove(deviceId);
+                // Keep the generation tombstone so a re-added ID cannot accept pre-prune work.
             }
         }
     }

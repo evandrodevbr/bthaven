@@ -160,6 +160,27 @@ public sealed class BatteryTelemetryCoordinatorTests
     }
 
     [Fact]
+    public async Task Pruned_id_readded_before_old_result_cannot_accept_old_generation()
+    {
+        var service = new ControlledBatteryService();
+        var coordinator = new BatteryTelemetryCoordinator(service);
+        var olderRefresh = coordinator.RefreshAsync([Device("phone")], priorityDeviceId: "phone");
+        await service.WaitForStartsAsync(1);
+
+        coordinator.Prune(new HashSet<string>(StringComparer.OrdinalIgnoreCase));
+        var newerRefresh = coordinator.RefreshAsync([Device("phone")], priorityDeviceId: "phone");
+        await service.WaitForStartsAsync(2);
+
+        service.Complete("phone", occurrence: 1, Available(90));
+        await newerRefresh;
+        service.Complete("phone", occurrence: 0, Available(10));
+        await olderRefresh;
+
+        Assert.True(coordinator.TryGet("phone", out var entry));
+        Assert.Equal(90, entry.Current?.Percentage);
+    }
+
+    [Fact]
     public async Task Cancellation_restores_previous_available_entry()
     {
         var service = new ControlledBatteryService();
