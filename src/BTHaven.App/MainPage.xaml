@@ -116,11 +116,19 @@
                 <AppBarButton x:Name="LogsButton"
                               Label="Logs"
                               Click="LogsButton_Click"
-                              AutomationProperties.Name="Abrir logs" />
+                              AutomationProperties.Name="Abrir logs">
+                    <AppBarButton.Icon>
+                        <FontIcon Glyph="&#xE8A5;" />
+                    </AppBarButton.Icon>
+                </AppBarButton>
                 <AppBarButton x:Name="DiagnosticsButton"
                               Label="Diagnósticos"
                               Click="DiagnosticsButton_Click"
-                              AutomationProperties.Name="Abrir diagnósticos" />
+                              AutomationProperties.Name="Abrir diagnósticos">
+                    <AppBarButton.Icon>
+                        <FontIcon Glyph="&#xE9D9;" />
+                    </AppBarButton.Icon>
+                </AppBarButton>
             </CommandBar>
         </Grid>
 
