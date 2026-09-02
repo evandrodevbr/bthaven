@@ -125,6 +125,7 @@
         <InfoBar x:Name="StatusInfoBar"
                  Grid.Row="1"
                  IsOpen="True"
+                 IsClosable="False"
                  Severity="Informational"
                  Message="Aguardando enumeração dos dispositivos emparelhados..."
                  AutomationProperties.LiveSetting="Polite" />
