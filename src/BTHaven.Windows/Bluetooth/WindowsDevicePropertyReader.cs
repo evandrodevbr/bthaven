@@ -25,6 +25,11 @@ internal static class WindowsDevicePropertyReader
         return int.TryParse(value?.ToString(), out var parsed) ? parsed : null;
     }
 
+    public static byte? Byte(IReadOnlyDictionary<string, object> properties, string key)
+    {
+        return Find(properties, key) is byte value ? value : null;
+    }
+
     public static string? String(IReadOnlyDictionary<string, object> properties, string key)
     {
         return Find(properties, key)?.ToString();

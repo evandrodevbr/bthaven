@@ -43,6 +43,8 @@ public sealed class WindowsDevicePropertiesBatteryProvider : IBatteryProvider
             return BatteryState.Unavailable(Name);
         }
 
+        BatteryState? partialState = null;
+
         foreach (var endpoint in endpoints)
         {
             cancellationToken.ThrowIfCancellationRequested();
@@ -82,36 +84,31 @@ public sealed class WindowsDevicePropertiesBatteryProvider : IBatteryProvider
             }
 
             cancellationToken.ThrowIfCancellationRequested();
-            var batteryLife = WindowsDevicePropertyReader.Int32(info.Properties, WindowsDevicePropertyNames.BatteryLife);
-            var batteryPlusCharging = WindowsDevicePropertyReader.Int32(info.Properties, WindowsDevicePropertyNames.BatteryPlusCharging);
-            var chargingRaw = WindowsDevicePropertyReader.String(info.Properties, WindowsDevicePropertyNames.ChargingState);
-            var charging = ParseChargingState(chargingRaw);
+            var batteryLife = WindowsDevicePropertyReader.Byte(
+                info.Properties,
+                WindowsDevicePropertyNames.BatteryLife);
+            var batteryPlusCharging = WindowsDevicePropertyReader.Byte(
+                info.Properties,
+                WindowsDevicePropertyNames.BatteryPlusCharging);
+            var chargingState = WindowsDevicePropertyReader.Byte(
+                info.Properties,
+                WindowsDevicePropertyNames.ChargingState);
+            var decoded = WindowsBatteryPropertyDecoder.Decode(
+                batteryLife,
+                batteryPlusCharging,
+                chargingState);
             logger.Debug("Battery.WindowsProperties.Values", new Dictionary<string, object?>
             {
                 ["deviceId"] = device.Id,
                 ["endpointId"] = endpoint.Id,
                 ["batteryLife"] = batteryLife,
                 ["batteryPlusCharging"] = batteryPlusCharging,
-                ["chargingState"] = chargingRaw,
-                ["parsedCharging"] = charging,
+                ["chargingState"] = chargingState,
+                ["parsedPercentage"] = decoded.Percentage,
+                ["parsedCharging"] = decoded.IsCharging,
             });
 
-            var percentage = batteryLife is >= 0 and <= 100
-                ? batteryLife
-                : batteryPlusCharging is >= 0 and <= 100
-                    ? batteryPlusCharging
-                    : null;
-
-            if (charging is null && batteryPlusCharging is >= 101)
-            {
-                charging = true;
-            }
-            else if (charging is null && batteryPlusCharging is >= 0 and <= 100)
-            {
-                charging = false;
-            }
-
-            if (percentage is null && charging is null)
+            if (!decoded.HasData)
             {
                 logger.Info("Battery.WindowsProperties.Unavailable", new Dictionary<string, object?>
                 {
@@ -124,8 +121,8 @@ public sealed class WindowsDevicePropertiesBatteryProvider : IBatteryProvider
 
             var state = new BatteryState
             {
-                Percentage = percentage,
-                IsCharging = charging,
+                Percentage = decoded.Percentage,
+                IsCharging = decoded.IsCharging,
                 Source = Name,
                 LastUpdated = DateTimeOffset.UtcNow,
                 Confidence = BatteryConfidence.High,
@@ -137,7 +134,17 @@ public sealed class WindowsDevicePropertiesBatteryProvider : IBatteryProvider
                 ["percentage"] = state.Percentage,
                 ["isCharging"] = state.IsCharging,
             });
-            return state;
+            if (state.Percentage is not null)
+            {
+                return state;
+            }
+
+            partialState ??= state;
+        }
+
+        if (partialState is not null)
+        {
+            return partialState;
         }
 
         logger.Info("Battery.WindowsProperties.Unavailable", new Dictionary<string, object?>
@@ -146,26 +153,6 @@ public sealed class WindowsDevicePropertiesBatteryProvider : IBatteryProvider
             ["reason"] = "No endpoint exposed a usable percentage or charging state",
         });
         return BatteryState.Unavailable(Name);
-    }
-
-    private static bool? ParseChargingState(string? raw)
-    {
-        if (string.IsNullOrWhiteSpace(raw))
-        {
-            return null;
-        }
-
-        var value = raw.ToLowerInvariant();
-        if (value.Contains("notcharging") || value.Contains("discharg") || value.Contains("idle"))
-        {
-            return false;
-        }
-        if (value.Contains("charg"))
-        {
-            return true;
-        }
-
-        return null;
     }
 
     private static string EscapeAqs(string value)
