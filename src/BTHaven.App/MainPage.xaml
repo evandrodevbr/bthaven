@@ -226,6 +226,9 @@
                                         <TextBlock Grid.Column="2"
                                                    Text="{Binding BatteryText}"
                                                    Style="{StaticResource CaptionText}"
+                                                   MaxWidth="120"
+                                                   TextTrimming="CharacterEllipsis"
+                                                   ToolTipService.ToolTip="{Binding BatteryText}"
                                                    VerticalAlignment="Center" />
                                         <ToggleSwitch Grid.Column="3"
                                                       Tag="{Binding Id}"
