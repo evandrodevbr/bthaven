@@ -811,6 +811,7 @@ public sealed partial class MainPage : Page
         if (loaded)
         {
             RefreshRows();
+            RefreshVisibleBatteryTelemetry(onlyMissing: true);
         }
     }
 
@@ -831,20 +832,35 @@ public sealed partial class MainPage : Page
         }
 
         var requestedDeviceId = selectedDeviceId;
-        if (requestedDeviceId is not null)
+        var epoch = selectionEpoch;
+        if (requestedDeviceId is null || !IsCurrentSelection(requestedDeviceId, epoch))
         {
-            BindA2dpTarget(requestedA2dpDeviceId, requestedDeviceId);
+            return;
         }
+
+        BindA2dpTarget(requestedA2dpDeviceId, requestedDeviceId);
         MediaAudioButton.IsEnabled = false;
         try
         {
             await autoReconnectService.DisableAsync();
+            if (!IsCurrentSelection(requestedDeviceId, epoch))
+            {
+                return;
+            }
             var connected = await a2dpService.ConnectAsync(requestedA2dpDeviceId, lifetime.Token);
+            if (!IsCurrentSelection(requestedDeviceId, epoch))
+            {
+                return;
+            }
             if (connected && AutoReconnectCheckBox.IsChecked == true)
             {
                 await autoReconnectService.EnableAsync(requestedA2dpDeviceId, lifetime.Token);
+                if (!IsCurrentSelection(requestedDeviceId, epoch))
+                {
+                    return;
+                }
             }
-            if (connected && requestedDeviceId is not null && devices.ContainsKey(requestedDeviceId))
+            if (connected)
             {
                 activeMediaDeviceId = requestedDeviceId;
                 RefreshRows();
@@ -852,8 +868,8 @@ public sealed partial class MainPage : Page
             var endpoint = OutputEndpointComboBox.SelectedItem as AudioEndpointModel;
             logger.Info("App.MediaAudioButton.Completed", new Dictionary<string, object?>
             {
-                ["deviceId"] = selectedDeviceId,
-                ["a2dpDeviceId"] = selectedA2dpDeviceId,
+                ["deviceId"] = requestedDeviceId,
+                ["a2dpDeviceId"] = requestedA2dpDeviceId,
                 ["connected"] = connected,
                 ["state"] = a2dpService.State.ToString(),
                 ["outputEndpointId"] = endpoint?.Id,
@@ -873,15 +889,22 @@ public sealed partial class MainPage : Page
         {
             logger.Error("App.MediaAudioActivation.Failed", exception, new Dictionary<string, object?>
             {
-                ["deviceId"] = selectedDeviceId,
-                ["a2dpDeviceId"] = selectedA2dpDeviceId,
+                ["deviceId"] = requestedDeviceId,
+                ["a2dpDeviceId"] = requestedA2dpDeviceId,
             });
+            if (!IsCurrentSelection(requestedDeviceId, epoch))
+            {
+                return;
+            }
             StatusInfoBar.Severity = InfoBarSeverity.Error;
             StatusInfoBar.Message = "Falha ao ativar o áudio; o HRESULT e a stack trace foram gravados nos Logs.";
         }
         finally
         {
-            MediaAudioButton.IsEnabled = selectedA2dpDeviceId is not null && !disposed;
+            if (IsCurrentSelection(requestedDeviceId, epoch))
+            {
+                MediaAudioButton.IsEnabled = selectedA2dpDeviceId is not null && !disposed;
+            }
         }
     }
 
@@ -1139,8 +1162,11 @@ public sealed partial class MainPage : Page
     {
         SelectedDeviceName.Text = device.Name;
         SelectedDeviceSubtitle.Text = $"{device.Category} · observado em {device.LastUpdated.ToLocalTime():HH:mm:ss}";
+        var connectedEndpointCount = device.Endpoints.Count(endpoint => endpoint.IsConnected == true);
         ConnectionStateText.Text = device.IsConnected
-            ? "Conectado"
+            ? connectedEndpointCount > 1
+                ? $"Conectado · {connectedEndpointCount} endpoints ativos"
+                : "Conectado"
             : device.IsPaired && device.IsPresent
                 ? "Emparelhado / presente"
                 : device.IsPaired

@@ -36,10 +36,13 @@ public sealed partial class MainPage
         }
     }
 
-    private void RefreshVisibleBatteryTelemetry()
+    private void RefreshVisibleBatteryTelemetry(bool onlyMissing = false)
     {
         var visiblePresent = GetVisibleDevices()
             .Where(device => device.IsPresent)
+            .Where(device => !onlyMissing
+                || !batteryTelemetry.TryGet(device.Id, out var entry)
+                || entry.Status == BatteryTelemetryStatus.NotRequested)
             .ToArray();
         QueueBatteryTelemetryRefresh(visiblePresent, selectedDeviceId);
     }
