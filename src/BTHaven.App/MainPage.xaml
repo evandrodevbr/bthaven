@@ -268,7 +268,7 @@
                                 HorizontalAlignment="Left"
                                 AutomationProperties.Name="Voltar à lista de dispositivos">
                             <Button.KeyboardAccelerators>
-                                <KeyboardAccelerator Key="Escape" />
+                                <KeyboardAccelerator x:Name="CompactBackAccelerator" Key="Escape" />
                             </Button.KeyboardAccelerators>
                             <StackPanel Orientation="Horizontal" Spacing="8">
                                 <FontIcon Glyph="&#xE72B;" FontSize="14" />

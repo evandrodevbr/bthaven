@@ -1071,6 +1071,10 @@ public sealed partial class MainPage : Page
         VisualStateChangedEventArgs args)
     {
         isCompactLayout = ReferenceEquals(args.NewState, CompactState);
+        // Aceleradores de controles ocultos continuam disparando (comportamento
+        // documentado); sem isso, Escape fecharia um ContentDialog e navegaria de
+        // volta ao mesmo tempo em compact.
+        CompactBackAccelerator.IsEnabled = isCompactLayout;
         if (!isCompactLayout)
         {
             return;
