@@ -43,7 +43,7 @@
                     <VisualState.Setters>
                         <Setter Target="WorkspaceRoot.Padding" Value="18,16,18,20" />
                         <Setter Target="WorkspaceRoot.RowSpacing" Value="12" />
-                        <Setter Target="DevicePaneColumn.Width" Value="280" />
+                        <Setter Target="DevicePaneColumn.Width" Value="360" />
                         <Setter Target="MasterDetailRegion.ColumnSpacing" Value="12" />
                         <Setter Target="DevicePane.Visibility" Value="Visible" />
                         <Setter Target="SelectedDevicePane.Visibility" Value="Visible" />
@@ -126,7 +126,7 @@
               Grid.Row="2"
               ColumnSpacing="18">
             <Grid.ColumnDefinitions>
-                <ColumnDefinition x:Name="DevicePaneColumn" Width="320" />
+                <ColumnDefinition x:Name="DevicePaneColumn" Width="360" />
                 <ColumnDefinition x:Name="DetailPaneColumn" Width="*" />
             </Grid.ColumnDefinitions>
             <Border x:Name="DevicePane"
