@@ -105,7 +105,7 @@
                 <TextBlock Text="Bluetooth Hub"
                            Style="{StaticResource TitleTextBlockStyle}"
                            AutomationProperties.HeadingLevel="Level1" />
-                <TextBlock Text="Observação real do Windows para Bluetooth Classic/LE, perfis, bateria e áudio"
+                <TextBlock Text="Observações reais do Windows para Bluetooth Classic/LE, perfis, bateria e áudio"
                            Opacity="0.72"
                            TextWrapping="Wrap" />
             </StackPanel>
@@ -295,7 +295,7 @@
                                        TextTrimming="CharacterEllipsis" />
                         </ContentControl>
                         <TextBlock x:Name="SelectedDeviceSubtitle"
-                                   Text="A lista usa observações do Windows, não polling agressivo."
+                                   Text="A lista usa observações do Windows, sem polling agressivo."
                                    Opacity="0.72"
                                    TextWrapping="Wrap" />
                         <Grid ColumnDefinitions="Auto,*"
@@ -407,7 +407,7 @@
                                            Style="{StaticResource CaptionText}" />
 
                                 <TextBlock Text="Volume remoto do smartphone" Style="{StaticResource SectionHeading}" />
-                                <TextBlock Text="Quando o Windows expõe uma rota oficial de controle AVRCP para este dispositivo, Volume do smartphone no PC não é tratado como volume do telefone."
+                                <TextBlock Text="O aplicativo ajusta o volume do telefone somente quando o Windows expõe uma rota oficial de controle AVRCP para este dispositivo."
                                            TextWrapping="Wrap"
                                            Opacity="0.72" />
                                 <InfoBar x:Name="RemoteVolumeInfoBar"

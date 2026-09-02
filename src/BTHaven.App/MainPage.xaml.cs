@@ -1025,7 +1025,7 @@ public sealed partial class MainPage : Page
             HfpStatusInfoBar.Title = result.Succeeded ? "HFP ativo" : $"HFP: {result.Status}";
             HfpStatusInfoBar.Message = result.Succeeded
                 ? result.Message ?? "Transporte HFP conectado."
-                : $"{result.Message} AccessStatus={result.AccessStatus ?? "unknown"}{(result.HResult is null ? string.Empty : $" HRESULT={result.HResult}")}. Consulte Logs para HRESULT e stack trace.";
+                : $"{(result.Message is null ? string.Empty : result.Message + " ")}AccessStatus={result.AccessStatus ?? "unknown"}{(result.HResult is null ? string.Empty : $" HRESULT={result.HResult}")}. Consulte Logs para HRESULT e stack trace.";
             HfpTransportText.Text = $"Transporte HFP: {result.Status}; conectado={result.IsConnected}; registrado={result.IsRegistered}";
             logger.Info("App.HFP.EnableButton.Completed", new Dictionary<string, object?>
             {
@@ -1207,7 +1207,7 @@ public sealed partial class MainPage : Page
     private void ClearSelection()
     {
         SelectedDeviceName.Text = "Selecione um dispositivo";
-        SelectedDeviceSubtitle.Text = "A lista usa observações do Windows, não polling agressivo.";
+        SelectedDeviceSubtitle.Text = "A lista usa observações do Windows, sem polling agressivo.";
         ConnectionStateText.Text = "—";
         TransportText.Text = "—";
         ConnectionTransportText.Text = "—";

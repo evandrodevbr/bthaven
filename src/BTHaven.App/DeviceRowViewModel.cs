@@ -55,7 +55,7 @@ public sealed class DeviceRowViewModel
         {
             return current.Percentage is int percentage
                 ? BatteryTextFormatter.FormatPercentage(percentage, current.IsCharging)
-                : current.IsCharging == true ? "Carregando" : "—";
+                : current.IsCharging switch { true => "Carregando", false => "Não carregando", _ => "—" };
         }
 
         if (telemetry?.LastAvailable is not { } lastAvailable)
@@ -140,13 +140,13 @@ public sealed class DeviceRowViewModel
         var category = model.Category switch
         {
             BluetoothDeviceCategory.Smartphone => "Smartphone",
-            BluetoothDeviceCategory.Headphones => "Headphones",
-            BluetoothDeviceCategory.Speaker => "Speaker",
+            BluetoothDeviceCategory.Headphones => "Fones de ouvido",
+            BluetoothDeviceCategory.Speaker => "Caixa de som",
             BluetoothDeviceCategory.Mouse => "Mouse",
-            BluetoothDeviceCategory.Keyboard => "Keyboard",
-            BluetoothDeviceCategory.Controller => "Controller",
-            BluetoothDeviceCategory.Peripheral => "Peripheral",
-            _ => "Bluetooth device",
+            BluetoothDeviceCategory.Keyboard => "Teclado",
+            BluetoothDeviceCategory.Controller => "Controle",
+            BluetoothDeviceCategory.Peripheral => "Periférico",
+            _ => "Dispositivo Bluetooth",
         };
         return $"{category} · {model.Transport}";
     }
@@ -155,7 +155,7 @@ public sealed class DeviceRowViewModel
     {
         if (model.IsConnected)
         {
-            return "● Conectado";
+            return "Conectado";
         }
         if (model.IsPaired && model.IsPresent)
         {
