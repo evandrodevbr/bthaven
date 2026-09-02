@@ -43,6 +43,11 @@
                     <VisualState.Setters>
                         <Setter Target="WorkspaceRoot.Padding" Value="18,16,18,20" />
                         <Setter Target="WorkspaceRoot.RowSpacing" Value="12" />
+                        <Setter Target="ProductHeader.ColumnSpacing" Value="0" />
+                        <Setter Target="GlobalCommandBar.(Grid.Row)" Value="1" />
+                        <Setter Target="GlobalCommandBar.(Grid.Column)" Value="0" />
+                        <Setter Target="GlobalCommandBar.(Grid.ColumnSpan)" Value="2" />
+                        <Setter Target="GlobalCommandBar.HorizontalAlignment" Value="Stretch" />
                         <Setter Target="DevicePaneColumn.Width" Value="360" />
                         <Setter Target="MasterDetailRegion.ColumnSpacing" Value="12" />
                         <Setter Target="DevicePane.Visibility" Value="Visible" />
