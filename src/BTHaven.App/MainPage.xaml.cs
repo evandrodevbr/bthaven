@@ -101,14 +101,25 @@ public sealed partial class MainPage : Page
         logger.Info("App.DeviceWatch.Started");
     }
 
-    private async void MainPage_Unloaded(object sender, RoutedEventArgs e)
+    private void MainPage_Unloaded(object sender, RoutedEventArgs e)
+    {
+        // Unloaded e evento da arvore visual (Hide()/minimizar nao o disparam); o
+        // teardown definitivo mora em ShutdownAsync, chamado por ExitApplication antes
+        // de Close(). Este e apenas o fallback de fechamento real.
+        if (MainWindow.IsShuttingDown)
+        {
+            _ = ShutdownAsync();
+        }
+    }
+
+    public async Task ShutdownAsync()
     {
         if (disposed)
         {
             return;
         }
 
-        logger.Info("App.MainPage.Unloaded");
+        logger.Info("App.MainPage.Shutdown");
         disposed = true;
         lifetime.Cancel();
         try

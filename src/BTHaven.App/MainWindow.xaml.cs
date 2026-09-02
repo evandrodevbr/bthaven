@@ -9,6 +9,8 @@ public sealed partial class MainWindow : Window
     private bool allowClose;
     private readonly TraceDiagnosticLogger logger = TraceDiagnosticLogger.Instance;
 
+    public static bool IsShuttingDown { get; private set; }
+
     public MainWindow()
     {
         InitializeComponent();
@@ -70,9 +72,15 @@ public sealed partial class MainWindow : Window
         ExitApplication();
     }
 
-    public void ExitApplication()
+    public async void ExitApplication()
     {
         logger.Info("App.Exit.Requested");
+        IsShuttingDown = true;
+        if (RootFrame.Content is MainPage page)
+        {
+            await page.ShutdownAsync();
+        }
+
         allowClose = true;
         TrayIcon.Dispose();
         Close();
