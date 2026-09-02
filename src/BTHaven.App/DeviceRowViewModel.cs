@@ -56,7 +56,7 @@ public sealed class DeviceRowViewModel
         if (telemetry?.Current is { } current)
         {
             return current.Percentage is int percentage
-                ? $"{percentage}%"
+                ? BatteryTextFormatter.FormatPercentage(percentage, current.IsCharging)
                 : current.IsCharging == true ? "Carregando" : "—";
         }
 
@@ -66,7 +66,7 @@ public sealed class DeviceRowViewModel
         }
 
         var lastValue = lastAvailable.Percentage is int lastPercentage
-            ? $"{lastPercentage}%"
+            ? BatteryTextFormatter.FormatPercentage(lastPercentage, lastAvailable.IsCharging)
             : lastAvailable.IsCharging switch
             {
                 true => "carregando",
@@ -95,11 +95,8 @@ public sealed class DeviceRowViewModel
         string connectionTransportText)
     {
         var battery = BuildBatteryAutomationText(telemetry);
-        var charging = telemetry?.Current is { Percentage: not null, IsCharging: true }
-            ? " · carregando"
-            : string.Empty;
         var rssi = model.Rssi is int value ? $" · {FormatRssi(value)}" : string.Empty;
-        return $"{battery}{charging} · {connectionTransportText}{rssi} · observado {model.LastUpdated.ToLocalTime():HH:mm:ss}";
+        return $"{battery} · {connectionTransportText}{rssi} · observado {model.LastUpdated.ToLocalTime():HH:mm:ss}";
     }
 
     private static string BuildBatteryAutomationText(BatteryTelemetryEntry? telemetry)
@@ -107,7 +104,7 @@ public sealed class DeviceRowViewModel
         if (telemetry?.Current is { } current)
         {
             return current.Percentage is int percentage
-                ? $"Bateria {percentage}%"
+                ? $"Bateria {BatteryTextFormatter.FormatPercentage(percentage, current.IsCharging)}"
                 : current.IsCharging switch
                 {
                     true => "Bateria carregando; porcentagem indisponível",
@@ -122,7 +119,7 @@ public sealed class DeviceRowViewModel
                 ? "Consulta de bateria em andamento"
                 : "Bateria atual indisponível";
             var lastValue = lastAvailable.Percentage is int lastPercentage
-                ? $"{lastPercentage}%"
+                ? BatteryTextFormatter.FormatPercentage(lastPercentage, lastAvailable.IsCharging)
                 : lastAvailable.IsCharging switch
                 {
                     true => "carregando; porcentagem indisponível",

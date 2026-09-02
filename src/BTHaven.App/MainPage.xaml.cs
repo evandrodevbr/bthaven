@@ -1105,7 +1105,7 @@ public sealed partial class MainPage : Page
         SelectedDevicePane.Visibility = Visibility.Visible;
         if (moveFocus)
         {
-            (DetailSelectorBar.SelectedItem ?? SummarySelectorItem).Focus(FocusState.Programmatic);
+            SelectedDeviceHeading.Focus(FocusState.Programmatic);
         }
     }
 

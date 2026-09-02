@@ -265,12 +265,17 @@
                                 <TextBlock Text="Voltar" />
                             </StackPanel>
                         </Button>
-                        <TextBlock x:Name="SelectedDeviceName"
-                                   Text="Selecione um dispositivo"
-                                   FontSize="26"
-                                   FontWeight="SemiBold"
-                                   TextTrimming="CharacterEllipsis"
-                                   AutomationProperties.HeadingLevel="Level2" />
+                        <ContentControl x:Name="SelectedDeviceHeading"
+                                        IsTabStop="True"
+                                        HorizontalContentAlignment="Stretch"
+                                        AutomationProperties.Name="{Binding Text, ElementName=SelectedDeviceName}"
+                                        AutomationProperties.HeadingLevel="Level2">
+                            <TextBlock x:Name="SelectedDeviceName"
+                                       Text="Selecione um dispositivo"
+                                       FontSize="26"
+                                       FontWeight="SemiBold"
+                                       TextTrimming="CharacterEllipsis" />
+                        </ContentControl>
                         <TextBlock x:Name="SelectedDeviceSubtitle"
                                    Text="A lista usa observações do Windows, não polling agressivo."
                                    Opacity="0.72"

@@ -13,4 +13,7 @@
   <ItemGroup>
     <ProjectReference Include="../../src/BTHaven.Windows/BTHaven.Windows.csproj" />
   </ItemGroup>
+  <ItemGroup>
+    <Compile Include="../../src/BTHaven.App/BatteryTextFormatter.cs" Link="BatteryTextFormatter.cs" />
+  </ItemGroup>
 </Project>

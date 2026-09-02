@@ -127,7 +127,7 @@ public sealed partial class MainPage
         if (entry?.Current is { } current)
         {
             BatteryText.Text = current.Percentage is int percentage
-                ? current.IsCharging == true ? $"{percentage}% · carregando" : $"{percentage}%"
+                ? BatteryTextFormatter.FormatPercentage(percentage, current.IsCharging)
                 : current.IsCharging switch
                 {
                     true => "Carregando · porcentagem indisponível",
@@ -143,7 +143,7 @@ public sealed partial class MainPage
         if (entry?.LastAvailable is { } lastAvailable)
         {
             BatteryText.Text = lastAvailable.Percentage is int percentage
-                ? $"Última leitura: {percentage}%"
+                ? $"Última leitura: {BatteryTextFormatter.FormatPercentage(percentage, lastAvailable.IsCharging)}"
                 : lastAvailable.IsCharging switch
                 {
                     true => "Última leitura: carregando · porcentagem indisponível",
