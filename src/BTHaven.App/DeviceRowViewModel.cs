@@ -1,3 +1,4 @@
+using BTHaven.Core.Battery;
 using BTHaven.Core.Devices;
 using Microsoft.UI;
 using Microsoft.UI.Xaml.Media;
@@ -6,15 +7,22 @@ namespace BTHaven_App;
 
 public sealed class DeviceRowViewModel
 {
-    public DeviceRowViewModel(BluetoothDeviceModel model, bool mediaEnabled = false)
+    public DeviceRowViewModel(
+        BluetoothDeviceModel model,
+        BatteryTelemetryEntry? telemetry = null,
+        bool mediaEnabled = false)
     {
         Id = model.Id;
         Name = model.Name;
         Summary = BuildSummary(model);
         StatusText = BuildStatus(model);
-        BatteryText = model.Battery?.Percentage is int percentage
-            ? $"{percentage}%"
-            : "—";
+        BatteryText = BuildBatteryText(telemetry);
+        ConnectionTransportText =
+            BluetoothEndpointSelection.SelectPreferredConnection(model)?.Transport.ToString()
+            ?? model.Transport.ToString();
+        TelemetryText = BuildTelemetryText(model, ConnectionTransportText);
+        TelemetryAutomationText = BuildTelemetryAutomationText(model, telemetry, ConnectionTransportText);
+        MediaAutomationName = $"Áudio de mídia para {model.Name}";
         IconGlyph = BuildGlyph(model.Category);
         MediaToggleEnabled = model.IsPaired
             && model.IsPresent
@@ -33,11 +41,104 @@ public sealed class DeviceRowViewModel
     public string Summary { get; }
     public string StatusText { get; }
     public string BatteryText { get; }
+    public string TelemetryText { get; }
+    public string TelemetryAutomationText { get; }
+    public string ConnectionTransportText { get; }
+    public string MediaAutomationName { get; }
     public string IconGlyph { get; }
     public SolidColorBrush StatusBrush { get; }
 
     public bool MediaToggleEnabled { get; }
     public bool MediaEnabled { get; }
+
+    private static string BuildBatteryText(BatteryTelemetryEntry? telemetry)
+    {
+        if (telemetry?.Current is { } current)
+        {
+            return current.Percentage is int percentage
+                ? $"{percentage}%"
+                : current.IsCharging == true ? "Carregando" : "—";
+        }
+
+        if (telemetry?.LastAvailable is not { } lastAvailable)
+        {
+            return "—";
+        }
+
+        var lastValue = lastAvailable.Percentage is int lastPercentage
+            ? $"{lastPercentage}%"
+            : lastAvailable.IsCharging switch
+            {
+                true => "carregando",
+                false => "não carregando",
+                _ => null,
+            };
+        return lastValue is null
+            ? "—"
+            : $"Última bateria: {lastValue} · {lastAvailable.LastUpdated.ToLocalTime():HH:mm}";
+    }
+
+    private static string BuildTelemetryText(
+        BluetoothDeviceModel model,
+        string connectionTransportText)
+    {
+        var rssi = model.Rssi is int value ? FormatRssi(value) : null;
+        var observed = $"observado {model.LastUpdated.ToLocalTime():HH:mm:ss}";
+        return string.Join(
+            " · ",
+            new[] { connectionTransportText, rssi, observed }.Where(value => value is not null));
+    }
+
+    private static string BuildTelemetryAutomationText(
+        BluetoothDeviceModel model,
+        BatteryTelemetryEntry? telemetry,
+        string connectionTransportText)
+    {
+        var battery = BuildBatteryAutomationText(telemetry);
+        var charging = telemetry?.Current is { Percentage: not null, IsCharging: true }
+            ? " · carregando"
+            : string.Empty;
+        var rssi = model.Rssi is int value ? $" · {FormatRssi(value)}" : string.Empty;
+        return $"{battery}{charging} · {connectionTransportText}{rssi} · observado {model.LastUpdated.ToLocalTime():HH:mm:ss}";
+    }
+
+    private static string BuildBatteryAutomationText(BatteryTelemetryEntry? telemetry)
+    {
+        if (telemetry?.Current is { } current)
+        {
+            return current.Percentage is int percentage
+                ? $"Bateria {percentage}%"
+                : current.IsCharging switch
+                {
+                    true => "Bateria carregando; porcentagem indisponível",
+                    false => "Bateria não está carregando; porcentagem indisponível",
+                    _ => "Bateria indisponível",
+                };
+        }
+
+        if (telemetry?.LastAvailable is { } lastAvailable)
+        {
+            var prefix = telemetry.Status == BatteryTelemetryStatus.Loading
+                ? "Consulta de bateria em andamento"
+                : "Bateria atual indisponível";
+            var lastValue = lastAvailable.Percentage is int lastPercentage
+                ? $"{lastPercentage}%"
+                : lastAvailable.IsCharging switch
+                {
+                    true => "carregando; porcentagem indisponível",
+                    false => "não carregando; porcentagem indisponível",
+                    _ => "indisponível",
+                };
+            return $"{prefix} · Última bateria: {lastValue} · {lastAvailable.LastUpdated.ToLocalTime():HH:mm}";
+        }
+
+        return telemetry?.Status == BatteryTelemetryStatus.Loading
+            ? "Consulta de bateria em andamento"
+            : "Bateria indisponível";
+    }
+
+    private static string FormatRssi(int value) =>
+        value < 0 ? $"−{-(long)value} dBm" : $"{value} dBm";
 
     private static string BuildSummary(BluetoothDeviceModel model)
     {

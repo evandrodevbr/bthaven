@@ -55,12 +55,16 @@
                         <ListView x:Name="DeviceList" Margin="6,0,6,6" SelectionMode="Single" SelectionChanged="DeviceList_SelectionChanged">
                             <ListView.ItemTemplate>
                                 <DataTemplate>
-                                    <Grid Padding="10" ColumnDefinitions="38,*,Auto,Auto" ColumnSpacing="10">
+                                    <Grid Padding="10"
+                                          ColumnDefinitions="38,*,Auto,Auto"
+                                          ColumnSpacing="10"
+                                          AutomationProperties.Name="{Binding TelemetryAutomationText}">
                                         <FontIcon Glyph="{Binding IconGlyph}" FontSize="22" VerticalAlignment="Center" />
                                         <StackPanel Grid.Column="1" Spacing="2" VerticalAlignment="Center">
                                             <TextBlock Text="{Binding Name}" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" />
                                             <TextBlock Text="{Binding Summary}" Style="{StaticResource CaptionText}" TextTrimming="CharacterEllipsis" />
                                             <TextBlock Text="{Binding StatusText}" FontSize="12" Foreground="{Binding StatusBrush}" />
+                                            <TextBlock Text="{Binding TelemetryText}" FontSize="11" Opacity="0.72" TextTrimming="CharacterEllipsis" />
                                         </StackPanel>
                                         <TextBlock Grid.Column="2" Text="{Binding BatteryText}" Style="{StaticResource CaptionText}" VerticalAlignment="Center" />
                                         <ToggleSwitch Grid.Column="3"
@@ -70,7 +74,7 @@
                                                       Toggled="MediaToggleSwitch_Toggled"
                                                       OnContent=""
                                                       OffContent=""
-                                                      AutomationProperties.Name="Áudio de mídia" />
+                                                      AutomationProperties.Name="{Binding MediaAutomationName}" />
                                     </Grid>
                                 </DataTemplate>
                             </ListView.ItemTemplate>
@@ -92,23 +96,35 @@
                         <InfoBar x:Name="StatusInfoBar" IsOpen="True" Severity="Informational" Message="Aguardando enumeração dos dispositivos emparelhados..." Margin="0,8,0,8" />
 
                         <TextBlock Text="Conexão" Style="{StaticResource SectionHeading}" />
-                        <Grid ColumnDefinitions="150,*" RowDefinitions="Auto,Auto,Auto,Auto" RowSpacing="6">
+                        <Grid ColumnDefinitions="150,*" RowDefinitions="Auto,Auto,Auto,Auto,Auto,Auto,Auto" RowSpacing="6">
                             <TextBlock Text="Estado Bluetooth" Style="{StaticResource CaptionText}" />
                             <TextBlock x:Name="ConnectionStateText" Grid.Column="1" Text="—" TextTrimming="CharacterEllipsis" />
-                            <TextBlock Grid.Row="1" Text="Transporte" Style="{StaticResource CaptionText}" />
+                            <TextBlock Grid.Row="1" Text="Transporte agregado" Style="{StaticResource CaptionText}" />
                             <TextBlock x:Name="TransportText" Grid.Row="1" Grid.Column="1" Text="—" />
-                            <TextBlock Grid.Row="2" Text="Endereço" Style="{StaticResource CaptionText}" />
-                            <TextBlock x:Name="AddressText" Grid.Row="2" Grid.Column="1" Text="—" TextTrimming="CharacterEllipsis" />
-                            <TextBlock Grid.Row="3" Text="ContainerId" Style="{StaticResource CaptionText}" />
-                            <TextBlock x:Name="ContainerIdText" Grid.Row="3" Grid.Column="1" Text="—" TextTrimming="CharacterEllipsis" />
+                            <TextBlock Grid.Row="2" Text="Transporte ativo" Style="{StaticResource CaptionText}" />
+                            <TextBlock x:Name="ConnectionTransportText" Grid.Row="2" Grid.Column="1" Text="—" />
+                            <TextBlock Grid.Row="3" Text="RSSI" Style="{StaticResource CaptionText}" />
+                            <TextBlock x:Name="RssiText" Grid.Row="3" Grid.Column="1" Text="—" />
+                            <TextBlock Grid.Row="4" Text="Observado" Style="{StaticResource CaptionText}" />
+                            <TextBlock x:Name="DeviceObservedText" Grid.Row="4" Grid.Column="1" Text="—" />
+                            <TextBlock Grid.Row="5" Text="Endereço" Style="{StaticResource CaptionText}" />
+                            <TextBlock x:Name="AddressText" Grid.Row="5" Grid.Column="1" Text="—" TextTrimming="CharacterEllipsis" />
+                            <TextBlock Grid.Row="6" Text="ContainerId" Style="{StaticResource CaptionText}" />
+                            <TextBlock x:Name="ContainerIdText" Grid.Row="6" Grid.Column="1" Text="—" TextTrimming="CharacterEllipsis" />
                         </Grid>
 
                         <TextBlock Text="Bateria" Style="{StaticResource SectionHeading}" />
-                        <Grid ColumnDefinitions="150,*" RowDefinitions="Auto,Auto" RowSpacing="6">
+                        <Grid ColumnDefinitions="150,*" RowDefinitions="Auto,Auto,Auto,Auto,Auto" RowSpacing="6">
                             <TextBlock Text="Estado" Style="{StaticResource CaptionText}" />
                             <TextBlock x:Name="BatteryText" Grid.Column="1" Text="—" />
-                            <TextBlock Grid.Row="1" Text="Fonte" Style="{StaticResource CaptionText}" />
-                            <TextBlock x:Name="BatterySourceText" Grid.Row="1" Grid.Column="1" Text="—" TextTrimming="CharacterEllipsis" />
+                            <TextBlock Grid.Row="1" Text="Consulta" Style="{StaticResource CaptionText}" />
+                            <TextBlock x:Name="BatteryTelemetryStatusText" Grid.Row="1" Grid.Column="1" Text="—" />
+                            <TextBlock Grid.Row="2" Text="Fonte" Style="{StaticResource CaptionText}" />
+                            <TextBlock x:Name="BatterySourceText" Grid.Row="2" Grid.Column="1" Text="—" TextTrimming="CharacterEllipsis" />
+                            <TextBlock Grid.Row="3" Text="Confiança" Style="{StaticResource CaptionText}" />
+                            <TextBlock x:Name="BatteryConfidenceText" Grid.Row="3" Grid.Column="1" Text="—" />
+                            <TextBlock Grid.Row="4" Text="Observação" Style="{StaticResource CaptionText}" />
+                            <TextBlock x:Name="BatteryObservedText" Grid.Row="4" Grid.Column="1" Text="—" />
                         </Grid>
 
                         <TextBlock Text="Capacidades observadas" Style="{StaticResource SectionHeading}" />

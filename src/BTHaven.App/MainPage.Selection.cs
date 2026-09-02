@@ -19,21 +19,25 @@ public sealed partial class MainPage
 
     private void RefreshRows()
     {
-        var filter = GetSelectedFilter();
-        var visible = devices.Values
-            .Where(device => BluetoothDeviceFilterMatcher.Matches(device, filter))
-            .OrderByDescending(device => device.IsConnected)
-            .ThenBy(device => device.Name, StringComparer.OrdinalIgnoreCase)
-            .ToArray();
-
+        var visible = GetVisibleDevices();
         ReconcileRowsAndSelection(visible);
 
         logger.Debug("App.Rows.Refreshed", new Dictionary<string, object?>
         {
-            ["filter"] = filter.ToString(),
+            ["filter"] = GetSelectedFilter().ToString(),
             ["visibleCount"] = visible.Length,
             ["knownCount"] = devices.Count,
         });
+    }
+
+    private BluetoothDeviceModel[] GetVisibleDevices()
+    {
+        var filter = GetSelectedFilter();
+        return devices.Values
+            .Where(device => BluetoothDeviceFilterMatcher.Matches(device, filter))
+            .OrderByDescending(device => device.IsConnected)
+            .ThenBy(device => device.Name, StringComparer.OrdinalIgnoreCase)
+            .ToArray();
     }
 
     private void ReconcileRowsAndSelection(IReadOnlyList<BluetoothDeviceModel> visible)
@@ -66,8 +70,10 @@ public sealed partial class MainPage
             Rows.Clear();
             foreach (var device in visible)
             {
+                var telemetry = batteryTelemetry.TryGet(device.Id, out var entry) ? entry : null;
                 Rows.Add(new DeviceRowViewModel(
                     device,
+                    telemetry,
                     SameId(activeMediaDeviceId, device.Id)));
             }
         }
@@ -115,6 +121,7 @@ public sealed partial class MainPage
             ["present"] = device.IsPresent,
         });
         RenderSelection(device);
+        RefreshBatteryTelemetryForSelection(device, selectionEpoch);
         _ = RefreshSelectedDeviceCapabilitiesAsync(device.Id, selectionEpoch);
     }
 

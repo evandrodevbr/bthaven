@@ -2,6 +2,7 @@ using System.Collections.Concurrent;
 using System.Collections.ObjectModel;
 using BTHaven.Core.Audio;
 using BTHaven.Core.Calls;
+using BTHaven.Core.Battery;
 using BTHaven.Core.Devices;
 using BTHaven.Windows.Audio;
 using BTHaven.Windows.Battery;
@@ -54,6 +55,8 @@ public sealed partial class MainPage : Page
         logger = TraceDiagnosticLogger.Instance;
         deviceManager = new BluetoothDeviceManager(logger);
         batteryService = new WindowsBatteryService(logger);
+        batteryTelemetry = new BatteryTelemetryCoordinator(batteryService);
+        batteryTelemetry.Changed += BatteryTelemetry_Changed;
         endpointManager = new AudioEndpointManager(logger);
         a2dpService = new A2dpSinkService(logger);
         a2dpService.StateChanged += A2dpService_StateChanged;
@@ -126,6 +129,7 @@ public sealed partial class MainPage : Page
             try
             {
                 a2dpService.StateChanged -= A2dpService_StateChanged;
+                batteryTelemetry.Changed -= BatteryTelemetry_Changed;
                 await deviceManager.DisposeAsync();
                 await batteryService.DisposeAsync();
                 await autoReconnectService.DisposeAsync();
@@ -183,7 +187,17 @@ public sealed partial class MainPage : Page
                 selectionEpoch++;
                 selectedInspection = null;
             }
-            RefreshRows();
+            isRefreshingDeviceInventory = true;
+            try
+            {
+                RefreshRows();
+            }
+            finally
+            {
+                isRefreshingDeviceInventory = false;
+            }
+            batteryTelemetry.Prune(devices.Keys.ToHashSet(StringComparer.OrdinalIgnoreCase));
+            RefreshVisibleBatteryTelemetry();
             if (previousSelectedDevice is not null
                 && selectedDeviceId is not null
                 && SameId(previousSelectedDevice.Id, selectedDeviceId)
@@ -289,6 +303,8 @@ public sealed partial class MainPage : Page
 
         var selectedDeviceUpdated = false;
         var selectedConnectionChanged = false;
+        var refreshChangedDeviceTelemetry = false;
+        var replaceInFlightTelemetry = false;
         if (change.Kind == BluetoothDeviceChangeKind.Removed)
         {
             var selectedTargetMapsRemovedDevice = selectedA2dpDeviceId is not null
@@ -321,6 +337,10 @@ public sealed partial class MainPage : Page
         {
             devices.TryGetValue(change.DeviceId, out var previousDevice);
             devices[change.DeviceId] = change.Device;
+            replaceInFlightTelemetry = previousDevice is not null
+                && ((!previousDevice.IsConnected && change.Device.IsConnected)
+                    || !HasSameEndpointSet(previousDevice, change.Device));
+            refreshChangedDeviceTelemetry = previousDevice is null || replaceInFlightTelemetry;
             selectedDeviceUpdated = SameId(selectedDeviceId, change.DeviceId);
             selectedConnectionChanged = selectedDeviceUpdated
                 && previousDevice is not null
@@ -366,6 +386,14 @@ public sealed partial class MainPage : Page
             {
                 _ = RefreshSelectedDeviceCapabilitiesAsync(selectedDevice.Id, selectionEpoch);
             }
+        }
+        if (change.Kind == BluetoothDeviceChangeKind.Removed)
+        {
+            batteryTelemetry.Prune(devices.Keys.ToHashSet(StringComparer.OrdinalIgnoreCase));
+        }
+        else if (refreshChangedDeviceTelemetry && change.Device is not null)
+        {
+            RefreshBatteryTelemetryForDevice(change.Device, replaceInFlightTelemetry);
         }
     }
 
@@ -535,17 +563,6 @@ public sealed partial class MainPage : Page
                 ["deviceId"] = device.Id,
                 ["name"] = device.Name,
             });
-            var battery = await batteryService.GetBatteryAsync(device, lifetime.Token);
-            if (!IsCurrentSelection(deviceId, epoch)
-                || !devices.TryGetValue(deviceId, out device))
-            {
-                return;
-            }
-
-            device = device with { Battery = battery };
-            devices[deviceId] = device;
-            RenderSelection(device);
-            RefreshRows();
 
             var audioTargets = await a2dpService.GetAvailableDevicesAsync(lifetime.Token);
             if (!IsCurrentSelection(deviceId, epoch)
@@ -633,8 +650,6 @@ public sealed partial class MainPage : Page
             logger.Info("App.DeviceCapabilities.Completed", new Dictionary<string, object?>
             {
                 ["deviceId"] = deviceId,
-                ["batterySource"] = battery.Source,
-                ["batteryPercentage"] = battery.Percentage,
                 ["a2dpCandidates"] = audioTargets.Count,
                 ["a2dpMatches"] = matchingTargets.Length,
                 ["hfpCandidates"] = hfpTargets.Count,
@@ -1061,12 +1076,15 @@ public sealed partial class MainPage : Page
                     ? "Emparelhado / desconectado"
                     : "Desconectado";
         TransportText.Text = device.Transport.ToString();
+        ConnectionTransportText.Text =
+            BluetoothEndpointSelection.SelectPreferredConnection(device)?.Transport.ToString()
+            ?? "Não exposto pelo Windows";
+        RssiText.Text = device.Rssi is int rssi ? FormatRssi(rssi) : "Não exposto pelo Windows";
+        DeviceObservedText.Text = device.LastUpdated.ToLocalTime().ToString("HH:mm:ss");
         AddressText.Text = device.Address ?? "Não exposto pelo Windows";
         ContainerIdText.Text = device.ContainerId ?? "Não exposto pelo Windows";
-        BatteryText.Text = device.Battery?.Percentage is int percentage
-            ? device.Battery.IsCharging == true ? $"{percentage}% · carregando" : $"{percentage}%"
-            : device.Battery?.IsCharging == true ? "Carregando · porcentagem indisponível" : "Indisponível";
-        BatterySourceText.Text = device.Battery?.Source ?? "Aguardando consulta";
+        RenderSelectedTelemetry(
+            batteryTelemetry.TryGet(device.Id, out var telemetry) ? telemetry : null);
         CapabilitiesText.Text = FormatCapabilities(device);
         InspectButton.IsEnabled = !disposed;
         if (selectedInspection?.DeviceId == device.Id)
@@ -1081,10 +1099,16 @@ public sealed partial class MainPage : Page
         SelectedDeviceSubtitle.Text = "A lista usa observações do Windows, não polling agressivo.";
         ConnectionStateText.Text = "—";
         TransportText.Text = "—";
+        ConnectionTransportText.Text = "—";
+        RssiText.Text = "—";
+        DeviceObservedText.Text = "—";
         AddressText.Text = "—";
         ContainerIdText.Text = "—";
         BatteryText.Text = "—";
+        BatteryTelemetryStatusText.Text = "—";
         BatterySourceText.Text = "—";
+        BatteryConfidenceText.Text = "—";
+        BatteryObservedText.Text = "—";
         CapabilitiesText.Text = "—";
         selectedInspection = null;
         remoteVolumeStatus = null;
