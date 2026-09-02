@@ -193,9 +193,7 @@
                         <ListView x:Name="DeviceList"
                                   Margin="6,0,6,6"
                                   SelectionMode="Single"
-                                  IsItemClickEnabled="True"
                                   SelectionChanged="DeviceList_SelectionChanged"
-                                  ItemClick="DeviceList_ItemClick"
                                   AutomationProperties.Name="Dispositivos Bluetooth">
                             <ListView.ItemTemplate>
                                 <DataTemplate>

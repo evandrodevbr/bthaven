@@ -561,10 +561,9 @@ public sealed partial class MainPage : Page
         preferredDeviceId = device.Id;
         SavePreferredDeviceId(device.Id);
         SetSelectedDevice(device.Id);
+        ShowCompactDeviceDetails(moveFocus: true);
     }
 
-    private void DeviceList_ItemClick(object sender, ItemClickEventArgs e) =>
-        ShowCompactDeviceDetails(moveFocus: true);
 
     private async Task RefreshSelectedDeviceCapabilitiesAsync(string deviceId, long epoch)
     {
