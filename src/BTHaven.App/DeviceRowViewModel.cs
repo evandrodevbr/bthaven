@@ -1,7 +1,7 @@
 using BTHaven.Core.Battery;
 using BTHaven.Core.Devices;
-using Microsoft.UI;
-using Microsoft.UI.Xaml.Media;
+using Microsoft.UI.Xaml;
+using Microsoft.UI.Xaml.Data;
 
 namespace BTHaven_App;
 
@@ -31,9 +31,7 @@ public sealed class DeviceRowViewModel
                 or BluetoothDeviceCategory.Speaker
                 || model.Capabilities.HasFlag(BluetoothCapabilities.MediaAudio));
         MediaEnabled = mediaEnabled;
-        StatusBrush = new SolidColorBrush(model.IsConnected
-            ? ColorHelper.FromArgb(255, 76, 188, 118)
-            : ColorHelper.FromArgb(255, 142, 151, 164));
+        IsConnected = model.IsConnected;
     }
 
     public string Id { get; }
@@ -46,7 +44,7 @@ public sealed class DeviceRowViewModel
     public string ConnectionTransportText { get; }
     public string MediaAutomationName { get; }
     public string IconGlyph { get; }
-    public SolidColorBrush StatusBrush { get; }
+    public bool IsConnected { get; }
 
     public bool MediaToggleEnabled { get; }
     public bool MediaEnabled { get; }
@@ -183,4 +181,15 @@ public sealed class DeviceRowViewModel
             _ => "\uE702",
         };
     }
+}
+
+// WinUI 3 nao tem DataStateTrigger (XamlCompiler WMC0001); a visibilidade dos
+// TextBlocks de status alternam a foreground ThemeResource apropriada no XAML.
+public sealed class BoolToVisibilityConverter : IValueConverter
+{
+    public object Convert(object value, Type targetType, object parameter, string language) =>
+        value is true ^ parameter is "invert" ? Visibility.Visible : Visibility.Collapsed;
+
+    public object ConvertBack(object value, Type targetType, object parameter, string language) =>
+        throw new NotSupportedException();
 }
