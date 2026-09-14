@@ -106,7 +106,7 @@ Integration: 7 passed, 0 failed
 ### PowerShell
 
 ```powershell
-Set-Location 'C:\Users\evand\Documents\GitHub\bthaven'
+Set-Location '<path-to-your-clone>'
 $env:Path = "$env:USERPROFILE\.dotnet;$env:Path"
 & "$env:USERPROFILE\.dotnet\dotnet.exe" run --project '.\probes\03-a2dp-sink\03-a2dp-sink.csproj' -c Release -- --exercise-first --hold-seconds 15
 & "$env:USERPROFILE\.dotnet\dotnet.exe" run --project '.\probes\04-phone-hfp\04-phone-hfp.csproj' -c Release -- --request-access --register --connect
