@@ -12,6 +12,21 @@ artifacts/
 *.nupkg
 TestResults/
 
+# Signing secrets and generated packaging output (keep build scripts)
+*.pfx
+*.p12
+*.key
+build/msix/
+**/AppPackages/
+build/install.log
+*.msix
+*.msixbundle
+*.appx
+*.appxbundle
+*.appxsym
+*.msixupload
+*.appxupload
+
 # Local SDKs and developer tools
 .dotnet/
 .nuget/
