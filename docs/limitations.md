@@ -14,3 +14,5 @@ These limitations are part of the initial design, not bugs to be hidden behind o
 - AEC, noise suppression, and AGC are future abstractions. The MVP prioritizes headsets; speaker-plus-microphone operation may lack AEC initially.
 - No vendor-specific battery hacks, Phone Link reverse engineering, HCI injection, unsigned driver, or virtual audio driver is included without a written architecture decision.
 - Probe results are machine- and device-dependent. A probe can prove an API path on the current machine, not universal compatibility.
+- Diagnostic logging is synchronous and durable on purpose: every event is written and flushed to disk before the call returns, so a crash leaves an actionable trail. Measured at roughly 0.7 ms per event on the development machine (2000 events, Release), which is acceptable for the handful of events per user action but not free. If a hot path ever logs hundreds of events per second, measure it again before changing the flush policy.
+

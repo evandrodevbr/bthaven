@@ -66,6 +66,25 @@ export PATH="$HOME/.dotnet:$PATH"
 dotnet build BTHaven.slnx -c Release -p:Platform=x64
 ```
 
+## Run the WinUI app
+
+The app is packaged with MSIX and must be launched with package identity. Do not start `BTHaven.App.exe` directly from `bin`; that bypasses package activation and can fail with `REGDB_E_CLASSNOTREG`.
+
+Build first, then launch the existing output through the package-aware MSBuild target:
+
+```powershell
+& "$env:USERPROFILE\.dotnet\dotnet.exe" build BTHaven.slnx -c Release -p:Platform=x64
+& "$env:USERPROFILE\.dotnet\dotnet.exe" msbuild src/BTHaven.App/BTHaven.App.csproj -t:Run -p:Platform=x64 -p:Configuration=Release -p:WinAppRunDetach=true
+```
+
+The MSBuild target passes the generated build-output folder directly to `winapp.exe`. This avoids the .NET CLI project-mode fallback, which can fail when the Windows `dotnet` command is not discoverable by the launcher.
+
+The first launch requires the Windows App Runtime packages for version `2.4.0` (framework, main, singleton, and DDLM) registered for the current user. The MSIX files are available under the restored `microsoft.windowsappsdk.runtime\2.4.0\tools\MSIX\win10-x64` NuGet directory.
+
+The package-aware command registers a development identity and launches the app through its AUMID; the direct executable path is not a supported launch path for this project.
+
+Close the running app before rebuilding; the registered AppX layout keeps `AppX\BTHaven.App.exe` open.
+
 Run the probes individually so their output can be inspected:
 
 ```text
@@ -117,6 +136,43 @@ docs/
 ## Privacy
 
 BTHaven is local-first. Audio buffers are intended to remain in memory, call audio is not recorded, and no telemetry or audio upload path is part of the architecture.
+
+Local logs under `%LOCALAPPDATA%\BTHaven\Logs` keep raw device identifiers so a failure can be correlated with a device, and they stay on the machine. The diagnostics ZIP is meant to be shared: it replaces each identity with a pseudonym (`redacted:<per-export token>:<sequence>`) that is random per export, so the same device maps to different names in two different ZIPs, while the service, RFCOMM, and protocol UUIDs needed to diagnose a profile failure are kept. See [`docs/architecture.md`](docs/architecture.md#diagnostics).
+
+## Continuous integration
+
+[`.github/workflows/ci.yml`](.github/workflows/ci.yml) restores with `--locked-mode`, builds the solution in `Release`/`x64`, and runs both test projects. The `packages.lock.json` files next to each project pin the resolved dependency graph; when a package reference changes, restore locally and commit the updated lock file with the change.
+
+Tests that need real Bluetooth or audio hardware carry a `RequiresHardware` trait and are excluded from CI through `HARDWARE_TRAIT_FILTER`. Run them deliberately on a machine with the hardware attached:
+
+```text
+dotnet test tests/BTHaven.IntegrationTests -c Release
+```
+
+The SDK is pinned in [`global.json`](global.json). The language version, analysis level, and lock-file restore are set once in [`Directory.Build.props`](Directory.Build.props).
+
+## Packaging and distribution
+
+Signing uses a code-signing certificate in the local store; the private key never leaves it by default.
+
+```powershell
+# Creates or reuses a non-exportable signing certificate in CurrentUser\My and prints its thumbprint.
+.\build\make-cert.ps1
+
+# Sign the package by thumbprint — the csproj holds no pinned certificate.
+& "$env:USERPROFILE\.dotnet\dotnet.exe" msbuild src/BTHaven.App/BTHaven.App.csproj -t:Publish `
+  -p:Platform=x64 -p:Configuration=Release -p:AppxPackageSigningEnabled=true `
+  -p:PackageCertificateThumbprint=<thumbprint>
+
+# Assemble a shareable folder (must be a NEW directory; nothing existing is overwritten).
+.\build\copy-to-desktop.ps1 -PackagePath '<path-to-signed-package>.msix' -Destination '<new-folder>'
+```
+
+The prepared folder contains the signed package, the public `.cer`, the installer, and signed dependencies — never a PFX. The end user runs `INSTALL.cmd`; only the certificate import elevates, and it asks for the full thumbprint before trusting the publisher in `LocalMachine\TrustedPeople`. `Root` is never modified. `.\build\check-packaging-safety.ps1` parses the active scripts and rejects a distribution folder that still carries private-key material.
+
+Do not share `build/msix/AppPublisher.pfx` or any other PFX: it holds the private key that allows signing packages as this publisher, and every machine that trusts the certificate would accept them.
+
+
 
 ## Contributing
 

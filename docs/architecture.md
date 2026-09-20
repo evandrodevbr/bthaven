@@ -77,4 +77,7 @@ Every provider returns `null`/`unavailable` when Windows or the device does not 
 
 ## Diagnostics
 
-Structured events use an event name, UTC timestamp, and typed fields. Raw identifiers are collected only for local troubleshooting and are not intended for public reports. The future diagnostics export must redact or omit unnecessary device addresses, phone numbers, caller IDs, and audio data.
+Structured events use an event name, UTC timestamp, and typed fields. Raw identifiers are collected only for local troubleshooting and are not intended for public reports.
+
+The log files under `%LOCALAPPDATA%\BTHaven\Logs` keep raw identifiers: they never leave the machine and exist to correlate a local failure with a device. The exported diagnostics ZIP is different. Each export derives an ephemeral pseudonym per identity — `redacted:<per-export token>:<sequence>` — so identifiers cannot be correlated across two ZIPs, while identifiers that matter for diagnosis — GATT, RFCOMM, and protocol UUIDs — are preserved verbatim. Device addresses, phone numbers, caller IDs, free text, and endpoint names are never written to the ZIP.
+
