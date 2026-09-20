@@ -1,4 +1,3 @@
-using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
@@ -14,7 +13,7 @@ namespace BTHaven.Windows.Diagnostics;
 
 public sealed class DiagnosticsExporter
 {
-    private const string SchemaVersion = "3";
+    private const string SchemaVersion = "4";
     private readonly IBluetoothDeviceService deviceService;
     private readonly IAudioEndpointService endpointService;
     private readonly IWindowsDiagnosticLogger logger;
@@ -50,13 +49,16 @@ public sealed class DiagnosticsExporter
         });
 
         var errors = new List<object>();
+        var pseudonyms = new DiagnosticPseudonymMap();
         var devices = await TryGetDevicesAsync(errors, cancellationToken).ConfigureAwait(false);
         var renderEndpoints = await TryGetEndpointsAsync(AudioEndpointDirection.Render, errors, cancellationToken).ConfigureAwait(false);
         var captureEndpoints = await TryGetEndpointsAsync(AudioEndpointDirection.Capture, errors, cancellationToken).ConfigureAwait(false);
         var adapter = await TryGetAdapterAsync(errors, cancellationToken).ConfigureAwait(false);
         var hfp = await TryGetHfpAsync(errors, cancellationToken).ConfigureAwait(false);
-        var inspections = await TryGetInspectionsAsync(devices, errors, cancellationToken).ConfigureAwait(false);
-        var recentLogs = logger.ReadRecent(maxLines: 5000, redactSensitive: true);
+        var inspections = await TryGetInspectionsAsync(devices, errors, pseudonyms, cancellationToken).ConfigureAwait(false);
+        var recentLogs = logger.ReadRecent(maxLines: 5000)
+            .Select(line => TraceDiagnosticLogger.RedactJsonLine(line, pseudonyms.Redact))
+            .ToArray();
 
         var payload = new
         {
@@ -67,14 +69,14 @@ public sealed class DiagnosticsExporter
             framework = System.Runtime.InteropServices.RuntimeInformation.FrameworkDescription,
             architecture = System.Runtime.InteropServices.RuntimeInformation.OSArchitecture.ToString(),
             adapter,
-            devices = devices.Select(SanitizeDevice).ToArray(),
-            inspections = inspections.Select(SanitizeInspection).ToArray(),
-            audioEndpoints = renderEndpoints.Concat(captureEndpoints).Select(SanitizeEndpoint).ToArray(),
+            devices = devices.Select(device => SanitizeDevice(device, pseudonyms)).ToArray(),
+            inspections = inspections.Select(snapshot => SanitizeInspection(snapshot, pseudonyms)).ToArray(),
+            audioEndpoints = renderEndpoints.Concat(captureEndpoints).Select(endpoint => SanitizeEndpoint(endpoint, pseudonyms)).ToArray(),
             hfp,
             errors,
             privacy = new
             {
-                identifiers = "redacted-sha256-prefix",
+                identifiers = "export-scoped-random-pseudonyms",
                 names = "redacted",
                 phoneNumbers = "not-collected",
                 audio = "not-collected",
@@ -92,8 +94,8 @@ public sealed class DiagnosticsExporter
         using (var archive = new System.IO.Compression.ZipArchive(stream, System.IO.Compression.ZipArchiveMode.Create))
         {
             WriteEntry(archive, "diagnostics.json", json);
-            WriteEntry(archive, "logs.jsonl", string.Join(Environment.NewLine, recentLogs) + (recentLogs.Count == 0 ? string.Empty : Environment.NewLine));
-            WriteEntry(archive, "README.txt", "BTHaven diagnostics export. Device identifiers and names are redacted. Audio buffers, phone numbers, caller IDs, and telemetry are not included. Logs are JSONL and were exported with sensitive fields redacted.\r\n");
+            WriteEntry(archive, "logs.jsonl", string.Join(Environment.NewLine, recentLogs) + (recentLogs.Length == 0 ? string.Empty : Environment.NewLine));
+            WriteEntry(archive, "README.txt", "BTHaven diagnostics export. Device identifiers use random, export-scoped pseudonyms shared by diagnostics and logs. The identity map is not included. Names and free-text errors are redacted; service UUIDs and diagnostic metadata are retained. Local JSONL logs still contain raw device identities and must not be shared directly. Audio buffers, phone numbers, caller IDs, and telemetry are not included.\r\n");
         }
 
         logger.Info("Diagnostics.ExportCompleted", new Dictionary<string, object?>
@@ -103,7 +105,7 @@ public sealed class DiagnosticsExporter
             ["inspectionCount"] = inspections.Count,
             ["endpointCount"] = renderEndpoints.Count + captureEndpoints.Count,
             ["errorCount"] = errors.Count,
-            ["logLineCount"] = recentLogs.Count,
+            ["logLineCount"] = recentLogs.Length,
         });
         return path;
     }
@@ -148,6 +150,7 @@ public sealed class DiagnosticsExporter
     private async Task<IReadOnlyList<BluetoothDeviceInspectionSnapshot>> TryGetInspectionsAsync(
         IReadOnlyList<BluetoothDeviceModel> devices,
         List<object> errors,
+        DiagnosticPseudonymMap pseudonyms,
         CancellationToken cancellationToken)
     {
         if (deviceInspector is null)
@@ -168,7 +171,7 @@ public sealed class DiagnosticsExporter
             }
             catch (Exception exception)
             {
-                AddError(errors, $"inspection:{Redact(device.Id)}", exception);
+                AddError(errors, $"inspection:{pseudonyms.Redact(device.Id)}", exception);
             }
         }
         return snapshots;
@@ -228,12 +231,12 @@ public sealed class DiagnosticsExporter
         }
     }
 
-    private static object SanitizeDevice(BluetoothDeviceModel device)
+    private static object SanitizeDevice(BluetoothDeviceModel device, DiagnosticPseudonymMap pseudonyms)
     {
         return new
         {
-            id = Redact(device.Id),
-            containerId = Redact(device.ContainerId),
+            id = pseudonyms.Redact(device.Id),
+            containerId = pseudonyms.Redact(device.ContainerId),
             name = "<redacted>",
             manufacturer = device.Manufacturer is null ? null : "<redacted>",
             model = device.Model is null ? null : "<redacted>",
@@ -254,13 +257,13 @@ public sealed class DiagnosticsExporter
         };
     }
 
-    private static object SanitizeInspection(BluetoothDeviceInspectionSnapshot snapshot)
+    private static object SanitizeInspection(BluetoothDeviceInspectionSnapshot snapshot, DiagnosticPseudonymMap pseudonyms)
     {
         return new
         {
-            deviceId = Redact(snapshot.DeviceId),
+            deviceId = pseudonyms.Redact(snapshot.DeviceId),
             name = "<redacted>",
-            containerId = Redact(snapshot.ContainerId),
+            containerId = pseudonyms.Redact(snapshot.ContainerId),
             manufacturer = snapshot.Manufacturer is null ? null : "<redacted>",
             model = snapshot.Model is null ? null : "<redacted>",
             address = "<redacted>",
@@ -274,15 +277,15 @@ public sealed class DiagnosticsExporter
             securePairing = snapshot.WasSecureConnectionUsedForPairing,
             transport = snapshot.Transport.ToString(),
             observedAt = snapshot.ObservedAt,
-            properties = snapshot.DeviceProperties.Select(SanitizeProperty).ToArray(),
+            properties = snapshot.DeviceProperties.Select(property => SanitizeProperty(property, pseudonyms)).ToArray(),
             endpoints = snapshot.Endpoints.Select(endpoint => new
             {
-                id = Redact(endpoint.Id),
+                id = pseudonyms.Redact(endpoint.Id),
                 kind = endpoint.Kind,
                 name = "<redacted>",
                 transport = endpoint.Transport.ToString(),
                 source = endpoint.Source,
-                containerId = Redact(endpoint.ContainerId),
+                containerId = pseudonyms.Redact(endpoint.ContainerId),
                 address = "<redacted>",
                 manufacturer = endpoint.Manufacturer is null ? null : "<redacted>",
                 model = endpoint.Model is null ? null : "<redacted>",
@@ -290,12 +293,12 @@ public sealed class DiagnosticsExporter
                 paired = endpoint.IsPaired,
                 connected = endpoint.IsConnected,
                 present = endpoint.IsPresent,
-                protocolId = Redact(endpoint.ProtocolId),
+                protocolId = endpoint.ProtocolId,
                 status = endpoint.Status,
                 observedAt = endpoint.ObservedAt,
                 hResult = endpoint.HResult,
                 message = endpoint.Message is null ? null : "<redacted>",
-                properties = endpoint.Properties.Select(SanitizeProperty).ToArray(),
+                properties = endpoint.Properties.Select(property => SanitizeProperty(property, pseudonyms)).ToArray(),
             }).ToArray(),
             battery = snapshot.BatteryObservations.Select(observation => new
             {
@@ -313,7 +316,7 @@ public sealed class DiagnosticsExporter
                 profile = profile.Profile,
                 source = profile.Source,
                 status = profile.Status,
-                deviceId = Redact(profile.DeviceId),
+                deviceId = pseudonyms.Redact(profile.DeviceId),
                 observedAt = profile.ObservedAt,
                 hResult = profile.HResult,
                 message = profile.Message is null ? null : "<redacted>",
@@ -329,7 +332,7 @@ public sealed class DiagnosticsExporter
             },
             gatt = snapshot.GattServices.Select(service => new
             {
-                uuid = Redact(service.Uuid) ?? "<redacted>",
+                uuid = service.Uuid,
                 attributeHandle = service.AttributeHandle,
                 status = service.Status,
                 source = service.Source,
@@ -338,7 +341,7 @@ public sealed class DiagnosticsExporter
                 message = service.Message is null ? null : "<redacted>",
                 characteristics = service.Characteristics.Select(characteristic => new
                 {
-                    uuid = Redact(characteristic.Uuid) ?? "<redacted>",
+                    uuid = characteristic.Uuid,
                     attributeHandle = characteristic.AttributeHandle,
                     properties = characteristic.Properties,
                     userDescription = characteristic.UserDescription is null ? null : "<redacted>",
@@ -350,7 +353,7 @@ public sealed class DiagnosticsExporter
                     message = characteristic.Message is null ? null : "<redacted>",
                     descriptors = characteristic.Descriptors.Select(descriptor => new
                     {
-                        uuid = Redact(descriptor.Uuid) ?? "<redacted>",
+                        uuid = descriptor.Uuid,
                         attributeHandle = descriptor.AttributeHandle,
                         source = descriptor.Source,
                         observedAt = descriptor.ObservedAt,
@@ -361,9 +364,9 @@ public sealed class DiagnosticsExporter
             }).ToArray(),
             rfcomm = snapshot.RfcommServices.Select(service => new
             {
-                serviceId = Redact(service.ServiceId),
+                serviceId = service.ServiceId,
                 knownName = service.KnownName is null ? null : "<redacted>",
-                deviceId = Redact(service.DeviceId),
+                deviceId = pseudonyms.Redact(service.DeviceId),
                 source = service.Source,
                 status = service.Status,
                 observedAt = service.ObservedAt,
@@ -383,7 +386,7 @@ public sealed class DiagnosticsExporter
         };
     }
 
-    private static object SanitizeProperty(BluetoothObservedProperty property)
+    private static object SanitizeProperty(BluetoothObservedProperty property, DiagnosticPseudonymMap pseudonyms)
     {
         var sensitive = property.Key.Contains("name", StringComparison.OrdinalIgnoreCase)
             || property.Key.Contains("address", StringComparison.OrdinalIgnoreCase)
@@ -391,12 +394,17 @@ public sealed class DiagnosticsExporter
             || property.Key.Contains("manufacturer", StringComparison.OrdinalIgnoreCase)
             || property.Key.Contains("model", StringComparison.OrdinalIgnoreCase)
             || property.Key.Contains("friendly", StringComparison.OrdinalIgnoreCase)
-            || property.Key.EndsWith("Id", StringComparison.OrdinalIgnoreCase);
+            || (property.Key.EndsWith("Id", StringComparison.OrdinalIgnoreCase)
+                && !property.Key.EndsWith("ProtocolId", StringComparison.OrdinalIgnoreCase)
+                && !property.Key.EndsWith("ServiceId", StringComparison.OrdinalIgnoreCase)
+                && !property.Key.EndsWith("ServiceUuid", StringComparison.OrdinalIgnoreCase)
+                && !property.Key.EndsWith("CharacteristicUuid", StringComparison.OrdinalIgnoreCase)
+                && !property.Key.EndsWith("DescriptorUuid", StringComparison.OrdinalIgnoreCase));
         return new
         {
             key = property.Key,
             type = property.Type,
-            value = sensitive ? Redact(property.Value) : property.Value,
+            value = sensitive ? pseudonyms.Redact(property.Value) : property.Value,
             source = property.Source,
             status = property.Status,
             observedAt = property.ObservedAt,
@@ -405,28 +413,17 @@ public sealed class DiagnosticsExporter
         };
     }
 
-    private static object SanitizeEndpoint(AudioEndpointModel endpoint)
+    private static object SanitizeEndpoint(AudioEndpointModel endpoint, DiagnosticPseudonymMap pseudonyms)
     {
         return new
         {
-            id = Redact(endpoint.Id),
+            id = pseudonyms.Redact(endpoint.Id),
             name = "<redacted>",
             direction = endpoint.Direction.ToString(),
             isDefault = endpoint.IsDefault,
             isActive = endpoint.IsActive,
             format = endpoint.Format,
         };
-    }
-
-    private static string? Redact(string? value)
-    {
-        if (string.IsNullOrWhiteSpace(value))
-        {
-            return null;
-        }
-
-        var bytes = SHA256.HashData(Encoding.UTF8.GetBytes(value));
-        return $"redacted:{Convert.ToHexString(bytes)[..16].ToLowerInvariant()}";
     }
 
     private static void AddError(List<object> errors, string operation, Exception exception)

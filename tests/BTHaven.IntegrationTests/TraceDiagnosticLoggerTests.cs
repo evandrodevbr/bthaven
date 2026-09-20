@@ -76,4 +76,79 @@ public sealed class TraceDiagnosticLoggerTests
         }
     }
 
+    [Fact]
+    [Trait("Category", "Integration")]
+    public void Redacted_reads_use_fresh_pseudonyms_without_changing_local_logs_or_service_metadata()
+    {
+        var directory = Path.Combine(Path.GetTempPath(), "bthaven-logger-tests", Guid.NewGuid().ToString("N"));
+        const string deviceId = "private-device-id";
+        const string serviceUuid = "0000180f-0000-1000-8000-00805f9b34fb";
+        try
+        {
+            var logger = new TraceDiagnosticLogger(directory);
+            logger.Info("Test.Pseudonyms", new Dictionary<string, object?>
+            {
+                ["deviceId"] = deviceId,
+                ["deviceUuid"] = deviceId,
+                ["nested"] = new[] { new Dictionary<string, object?> { ["endpointId"] = deviceId } },
+                ["serviceUuid"] = serviceUuid,
+                ["serviceId"] = serviceUuid,
+                ["hResult"] = "0x80070005",
+                ["status"] = "Success",
+            });
+            var raw = Assert.Single(logger.ReadRecent(), line => line.Contains("Test.Pseudonyms", StringComparison.Ordinal));
+            using var rawDocument = JsonDocument.Parse(raw);
+            var pseudonyms = new List<string>();
+            for (var index = 0; index < 2; index++)
+            {
+                var line = Assert.Single(logger.ReadRecent(redactSensitive: true), item => item.Contains("Test.Pseudonyms", StringComparison.Ordinal));
+                Assert.DoesNotContain(deviceId, line, StringComparison.Ordinal);
+                using var document = JsonDocument.Parse(line);
+                var data = document.RootElement.GetProperty("data");
+                var pseudonym = data.GetProperty("deviceId").GetString()!;
+                Assert.Equal(pseudonym, data.GetProperty("nested")[0].GetProperty("endpointId").GetString());
+                Assert.Equal(pseudonym, data.GetProperty("deviceUuid").GetString());
+                Assert.Equal(serviceUuid, data.GetProperty("serviceUuid").GetString());
+                Assert.Equal(serviceUuid, data.GetProperty("serviceId").GetString());
+                Assert.Equal("0x80070005", data.GetProperty("hResult").GetString());
+                Assert.Equal("Success", data.GetProperty("status").GetString());
+                foreach (var field in new[] { "timestampUtc", "sequence", "processId", "threadId", "level", "event" })
+                {
+                    Assert.Equal(rawDocument.RootElement.GetProperty(field).ToString(), document.RootElement.GetProperty(field).ToString());
+                }
+                pseudonyms.Add(pseudonym);
+            }
+            Assert.NotEqual(pseudonyms[0], pseudonyms[1]);
+            Assert.Equal(raw, Assert.Single(logger.ReadRecent(), line => line.Contains("Test.Pseudonyms", StringComparison.Ordinal)));
+            Assert.Contains(deviceId, raw, StringComparison.Ordinal);
+        }
+        finally
+        {
+            Directory.Delete(directory, recursive: true);
+        }
+    }
+
+    [Fact]
+    [Trait("Category", "Integration")]
+    public void Redacted_reads_do_not_pass_through_nonobject_or_malformed_log_records()
+    {
+        var directory = Path.Combine(Path.GetTempPath(), "bthaven-logger-tests", Guid.NewGuid().ToString("N"));
+        const string identity = "private-corrupted-record";
+        try
+        {
+            var logger = new TraceDiagnosticLogger(directory);
+            File.AppendAllLines(logger.CurrentLogPath!, [identity, $"\"{identity}\"", $"[\"{identity}\"]"]);
+
+            var lines = logger.ReadRecent(redactSensitive: true);
+
+            Assert.DoesNotContain(lines, line => line.Contains(identity, StringComparison.Ordinal));
+            Assert.Contains(lines, line => line.Contains("Logging.SessionStarted", StringComparison.Ordinal));
+            Assert.Contains(logger.ReadRecent(), line => line.Contains(identity, StringComparison.Ordinal));
+        }
+        finally
+        {
+            Directory.Delete(directory, recursive: true);
+        }
+    }
+
 }

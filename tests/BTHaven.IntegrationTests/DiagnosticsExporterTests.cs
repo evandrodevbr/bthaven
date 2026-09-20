@@ -1,5 +1,6 @@
 using System.IO.Compression;
 using System.Text;
+using System.Text.Json;
 using BTHaven.Core.Audio;
 using BTHaven.Core.Contracts;
 using BTHaven.Core.Devices;
@@ -222,14 +223,14 @@ public sealed class DiagnosticsExporterTests
 
     [Fact]
     [Trait("Category", "Integration")]
-    public async Task Export_redacts_gatt_and_rfcomm_names_but_preserves_diagnostic_metadata()
+    public async Task Export_preserves_service_identifiers_but_redacts_device_identity_and_free_text()
     {
         var root = Path.Combine(Path.GetTempPath(), "bthaven-exporter-tests", Guid.NewGuid().ToString("N"));
         var exportDirectory = Path.Combine(root, "exports");
         Directory.CreateDirectory(root);
-        const string gattServiceUuid = "gatt-service-sentinel";
-        const string gattCharacteristicUuid = "gatt-characteristic-sentinel";
-        const string gattDescriptorUuid = "gatt-descriptor-sentinel";
+        const string gattServiceUuid = "0000180f-0000-1000-8000-00805f9b34fb";
+        const string gattCharacteristicUuid = "00002a19-0000-1000-8000-00805f9b34fb";
+        const string gattDescriptorUuid = "00002901-0000-1000-8000-00805f9b34fb";
         const string userDescription = "gatt-user-description-sentinel";
         const string rfcommName = "rfcomm-name-sentinel";
         var device = new BluetoothDeviceModel
@@ -323,17 +324,22 @@ public sealed class DiagnosticsExporterTests
 
                 foreach (var sentinel in new[]
                 {
-                    gattServiceUuid,
-                    gattCharacteristicUuid,
-                    gattDescriptorUuid,
                     userDescription,
-                    "rfcomm-id-sentinel",
                     rfcommName,
                     "rfcomm-device-sentinel",
                 })
                 {
                     Assert.DoesNotContain(sentinel, json, StringComparison.Ordinal);
                 }
+
+                using var document = JsonDocument.Parse(json);
+                var inspection = document.RootElement.GetProperty("inspections")[0];
+                var service = inspection.GetProperty("gatt")[0];
+                Assert.Equal(gattServiceUuid, service.GetProperty("uuid").GetString());
+                var characteristic = service.GetProperty("characteristics")[0];
+                Assert.Equal(gattCharacteristicUuid, characteristic.GetProperty("uuid").GetString());
+                Assert.Equal(gattDescriptorUuid, characteristic.GetProperty("descriptors")[0].GetProperty("uuid").GetString());
+                Assert.Equal("rfcomm-id-sentinel", inspection.GetProperty("rfcomm")[0].GetProperty("serviceId").GetString());
 
                 Assert.Contains("\"attributeHandle\": 17", json, StringComparison.Ordinal);
                 Assert.Contains("\"status\": \"Success\"", json, StringComparison.Ordinal);
@@ -344,6 +350,101 @@ public sealed class DiagnosticsExporterTests
             {
                 File.Delete(path);
             }
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [Fact]
+    [Trait("Category", "Integration")]
+    public async Task Exports_share_identity_pseudonyms_with_logs_only_within_each_archive()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "bthaven-exporter-tests", Guid.NewGuid().ToString("N"));
+        var device = new BluetoothDeviceModel
+        {
+            Id = "private-device-identity",
+            Name = "Private Phone Name",
+            ContainerId = "private-container-identity",
+            Transport = BluetoothTransport.LowEnergy,
+        };
+        const string endpointId = "private-endpoint-identity";
+        var snapshot = new BluetoothDeviceInspectionSnapshot
+        {
+            DeviceId = device.Id,
+            Name = device.Name,
+            ContainerId = device.ContainerId,
+            Endpoints =
+            [
+                new BluetoothEndpointInspection
+                {
+                    Id = endpointId,
+                    Kind = "AssociationEndpoint",
+                    ContainerId = device.ContainerId,
+                    Properties =
+                    [
+                        new BluetoothObservedProperty { Key = "System.Devices.DeviceInstanceId", Type = "String", Value = device.Id },
+                    ],
+                },
+            ],
+        };
+        try
+        {
+            var logger = new TraceDiagnosticLogger(Path.Combine(root, "logs"));
+            logger.Info("Test.Identity", new Dictionary<string, object?>
+            {
+                ["deviceId"] = device.Id,
+                ["containerId"] = device.ContainerId,
+                ["endpointId"] = endpointId,
+                ["name"] = device.Name,
+                ["status"] = "Connected",
+                ["count"] = 2,
+            });
+            var exporter = new DiagnosticsExporter(
+                new StubDeviceService([device]), new StubEndpointService(), logger,
+                new StubInspector(snapshot), Path.Combine(root, "exports"));
+            var paths = await Task.WhenAll(exporter.ExportAsync(), exporter.ExportAsync());
+            var identities = new List<string[]>();
+            foreach (var path in paths)
+            {
+                using var archive = ZipFile.OpenRead(path);
+                foreach (var entry in archive.Entries)
+                {
+                    using var entryReader = new StreamReader(entry.Open());
+                    var content = await entryReader.ReadToEndAsync();
+                    foreach (var identity in new[] { device.Id, device.ContainerId!, endpointId, device.Name })
+                    {
+                        Assert.DoesNotContain(identity, content, StringComparison.Ordinal);
+                    }
+                }
+
+                using var reader = new StreamReader(archive.GetEntry("diagnostics.json")!.Open());
+                using var document = JsonDocument.Parse(await reader.ReadToEndAsync());
+                var exportedDevice = document.RootElement.GetProperty("devices")[0];
+                var inspection = document.RootElement.GetProperty("inspections")[0];
+                var exportedId = exportedDevice.GetProperty("id").GetString()!;
+                var exportedContainer = exportedDevice.GetProperty("containerId").GetString()!;
+                var exportedEndpoint = inspection.GetProperty("endpoints")[0].GetProperty("id").GetString()!;
+                Assert.Equal(exportedId, inspection.GetProperty("deviceId").GetString());
+                Assert.Equal(exportedContainer, inspection.GetProperty("containerId").GetString());
+                Assert.Equal(exportedId, inspection.GetProperty("endpoints")[0].GetProperty("properties")[0].GetProperty("value").GetString());
+
+                using var logReader = new StreamReader(archive.GetEntry("logs.jsonl")!.Open());
+                var logLines = (await logReader.ReadToEndAsync()).Split('\n', StringSplitOptions.RemoveEmptyEntries);
+                using var log = JsonDocument.Parse(Assert.Single(logLines, line => line.Contains("Test.Identity", StringComparison.Ordinal)));
+                var data = log.RootElement.GetProperty("data");
+                Assert.Equal(exportedId, data.GetProperty("deviceId").GetString());
+                Assert.Equal(exportedContainer, data.GetProperty("containerId").GetString());
+                Assert.Equal(exportedEndpoint, data.GetProperty("endpointId").GetString());
+                Assert.Equal("Connected", data.GetProperty("status").GetString());
+                Assert.Equal(2, data.GetProperty("count").GetInt32());
+                identities.Add([exportedId, exportedContainer, exportedEndpoint, log.RootElement.GetProperty("sessionId").GetString()!]);
+                Assert.Equal(4, identities[^1].Distinct(StringComparer.Ordinal).Count());
+            }
+
+            Assert.Empty(identities[0].Intersect(identities[1], StringComparer.Ordinal));
+            Assert.Contains(logger.ReadRecent(), line => line.Contains(device.Id, StringComparison.Ordinal));
         }
         finally
         {

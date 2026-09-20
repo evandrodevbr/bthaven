@@ -1,6 +1,5 @@
 using System.Collections;
 using System.Diagnostics;
-using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
@@ -12,6 +11,7 @@ namespace BTHaven.Windows.Diagnostics;
 /// <summary>
 /// Durable local JSONL diagnostics. Events are flushed before the call returns so a crash or
 /// Bluetooth service restart leaves an actionable trail. Raw audio is never logged.
+/// Local files retain raw device identities; only redacted reads and diagnostics exports pseudonymize them.
 /// </summary>
 public sealed class TraceDiagnosticLogger : IWindowsDiagnosticLogger
 {
@@ -115,6 +115,7 @@ public sealed class TraceDiagnosticLogger : IWindowsDiagnosticLogger
             return [];
         }
 
+        var pseudonyms = redactSensitive ? new DiagnosticPseudonymMap() : null;
         var lines = new Queue<string>(Math.Min(maxLines, 10_000));
         try
         {
@@ -139,7 +140,7 @@ public sealed class TraceDiagnosticLogger : IWindowsDiagnosticLogger
                         continue;
                     }
 
-                    lines.Enqueue(redactSensitive ? RedactJsonLine(line) : line);
+                    lines.Enqueue(pseudonyms is not null ? RedactJsonLine(line, pseudonyms.Redact) : line);
                     while (lines.Count > maxLines)
                     {
                         lines.Dequeue();
@@ -409,17 +410,17 @@ public sealed class TraceDiagnosticLogger : IWindowsDiagnosticLogger
             || compact.Equals("apikey", StringComparison.Ordinal);
     }
 
-    private static string RedactJsonLine(string line)
+    internal static string RedactJsonLine(string line, Func<string, string?> pseudonymize)
     {
         try
         {
             var node = JsonNode.Parse(line);
-            if (node is null)
+            if (node is not JsonObject)
             {
                 return "[REDACTED_INVALID_LOG_LINE]";
             }
 
-            RedactExportNode(node);
+            RedactExportNode(node, pseudonymize);
             return node.ToJsonString(JsonOptions);
         }
         catch
@@ -428,7 +429,7 @@ public sealed class TraceDiagnosticLogger : IWindowsDiagnosticLogger
         }
     }
 
-    private static void RedactExportNode(JsonNode node)
+    private static void RedactExportNode(JsonNode node, Func<string, string?> pseudonymize)
     {
         if (node is JsonObject jsonObject)
         {
@@ -437,14 +438,14 @@ public sealed class TraceDiagnosticLogger : IWindowsDiagnosticLogger
                 if (IsExportSensitiveKey(property.Key))
                 {
                     jsonObject[property.Key] = property.Value is JsonValue value && value.TryGetValue<string>(out var text)
-                        ? RedactExportValue(property.Key, text)
+                        ? RedactExportValue(property.Key, text, pseudonymize)
                         : "[REDACTED]";
                     continue;
                 }
 
                 if (property.Value is not null)
                 {
-                    RedactExportNode(property.Value);
+                    RedactExportNode(property.Value, pseudonymize);
                 }
             }
         }
@@ -454,21 +455,21 @@ public sealed class TraceDiagnosticLogger : IWindowsDiagnosticLogger
             {
                 if (item is not null)
                 {
-                    RedactExportNode(item);
+                    RedactExportNode(item, pseudonymize);
                 }
             }
         }
     }
 
-    private static string RedactExportValue(string key, string value)
+    private static string RedactExportValue(string key, string value, Func<string, string?> pseudonymize)
     {
         var compact = key.Replace("_", string.Empty, StringComparison.Ordinal)
             .Replace("-", string.Empty, StringComparison.Ordinal)
             .Replace(" ", string.Empty, StringComparison.Ordinal)
             .ToLowerInvariant();
-        return compact is "message" or "stacktrace"
+        return IsSecretKey(key) || compact is "message" or "stacktrace"
             ? "[REDACTED]"
-            : RedactIdentifier(value);
+            : pseudonymize(value) ?? "[REDACTED]";
     }
 
     private static bool IsExportSensitiveKey(string key)
@@ -482,24 +483,22 @@ public sealed class TraceDiagnosticLogger : IWindowsDiagnosticLogger
             .Replace("-", string.Empty, StringComparison.Ordinal)
             .Replace(" ", string.Empty, StringComparison.Ordinal)
             .ToLowerInvariant();
+        // These describe protocols/services or local execution, not device identity.
+        if (compact is "uuid" or "serviceuuid" or "characteristicuuid" or "descriptoruuid"
+            or "serviceid" or "protocolid" or "processid" or "threadid")
+        {
+            return false;
+        }
+
         return compact is "id" or "deviceid" or "containerid" or "address" or "name"
             or "friendlyname" or "manufacturer" or "model" or "path" or "process"
             or "commandline" or "username" or "user" or "message" or "stacktrace"
-            or "logicalkey" or "selector"
+            or "logicalkey" or "selector" or "hostname" or "devicename" or "endpointname"
+            || compact.EndsWith("address", StringComparison.Ordinal)
             || compact.EndsWith("id", StringComparison.Ordinal)
             || compact.EndsWith("selector", StringComparison.Ordinal)
             || (compact.StartsWith("logical", StringComparison.Ordinal)
                 && compact.EndsWith("key", StringComparison.Ordinal));
     }
 
-    private static string RedactIdentifier(string? value)
-    {
-        if (string.IsNullOrWhiteSpace(value))
-        {
-            return "[REDACTED]";
-        }
-
-        var bytes = SHA256.HashData(Encoding.UTF8.GetBytes(value));
-        return $"redacted:{Convert.ToHexString(bytes)[..16].ToLowerInvariant()}";
-    }
 }
