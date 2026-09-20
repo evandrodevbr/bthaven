@@ -7,32 +7,14 @@ param(
 
 $ErrorActionPreference = 'Stop'
 
-# A freshly signed package has an intact signature whose chain ends in a root the
-# machine does not trust yet: that is the normal state before installation, and
-# Get-AuthenticodeSignature reports it as UnknownError/NotTrusted. Accept those,
-# reject anything that means the file or signature itself is damaged.
-function Test-SignatureIntact {
-    param([Parameter(Mandatory)][System.Management.Automation.Signature]$Signature)
-
-    if (-not $Signature.SignerCertificate) { return $false }
-    if ($Signature.Status -eq 'Valid') { return $true }
-    if ($Signature.Status -notin 'UnknownError', 'NotTrusted') { return $false }
-
-    $chain = [Security.Cryptography.X509Certificates.X509Chain]::new()
-    try {
-        $null = $chain.Build($Signature.SignerCertificate)
-        $acceptable = 'UntrustedRoot', 'RevocationStatusUnknown', 'OfflineRevocation'
-        return @($chain.ChainStatus | Where-Object { $_.Status.ToString() -notin $acceptable }).Count -eq 0
-    } finally {
-        $chain.Dispose()
-    }
-}
-
 $package = Get-Item -LiteralPath $PackagePath
 if ($package.PSIsContainer -or $package.Extension -notin '.msix', '.appx') { throw 'Select one signed MSIX/AppX package.' }
 $signature = Get-AuthenticodeSignature -LiteralPath $package.FullName
-if (-not (Test-SignatureIntact -Signature $signature)) {
-    throw "A signed, unmodified package is required: $($signature.Status)."
+if (-not $signature.SignerCertificate -or $signature.Status -notin 'Valid', 'UnknownError', 'NotTrusted') {
+    throw "Package signature is missing or rejected: $($signature.Status)."
+}
+if ($signature.Status -ne 'Valid') {
+    Write-Warning "Distribution package signature is UNVERIFIED ($($signature.Status)); its integrity cannot yet be certified. The installer requires a Valid signature after explicitly approved certificate trust."
 }
 # A fresh directory avoids silently redistributing a private key left by an older installer.
 if (Test-Path -LiteralPath $Destination) { throw 'Destination already exists. Choose a NEW directory; no existing files will be deleted or overwritten.' }
@@ -62,8 +44,9 @@ $dependencies = @(foreach ($folder in (@($dependencyRoot, (Join-Path $dependency
 })
 if (@($dependencies.Name | Select-Object -Unique).Count -ne $dependencies.Count) { throw 'Duplicate dependency filenames; resolve the package output before distributing.' }
 foreach ($dependency in $dependencies) {
-    if (-not (Test-SignatureIntact -Signature (Get-AuthenticodeSignature -LiteralPath $dependency.FullName))) {
-        throw "Damaged or unsigned dependency: $($dependency.FullName)"
+    $dependencySignature = Get-AuthenticodeSignature -LiteralPath $dependency.FullName
+    if ($dependencySignature.Status -ne 'Valid') {
+        throw "Dependency signature must be trusted and Valid: $($dependency.FullName) ($($dependencySignature.Status))."
     }
 }
 
@@ -92,6 +75,8 @@ BTHaven - public-certificate installer
    Subject: $($certificate.Subject)
    Package: $($package.Name)
    SHA256: $((Get-FileHash -LiteralPath $package.FullName -Algorithm SHA256).Hash)
+   An untrusted signature is UNVERIFIED: distribution does not certify its integrity.
+   The installer requires a Valid signature with the matching signer after certificate trust.
 3. Open INSTALL.cmd as the user who will use BTHaven (do not run the whole installer as a different administrator).
 4. If trust is missing, Windows requests administrator elevation for the CER import only.
    Review the certificate and type its complete thumbprint to approve LocalMachine\TrustedPeople.
@@ -101,7 +86,7 @@ BTHaven - public-certificate installer
 6. If PowerShell policy blocks the script, have your administrator review/sign or approve the scripts.
    This installer does not change execution policy or bypass organization policy.
 
-Only the package, public CER, installer scripts, these instructions and signed dependencies belong here.
+Only the package, public CER, installer scripts, these instructions and dependencies with Valid signatures belong here.
 Existing Desktop installers, PFX files and installed certificates were NOT deleted or changed.
 If an older PFX was shared, its owner must approve cleanup and evaluate certificate/key rotation before further distribution.
 "@

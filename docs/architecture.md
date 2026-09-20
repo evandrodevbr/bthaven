@@ -79,5 +79,7 @@ Every provider returns `null`/`unavailable` when Windows or the device does not 
 
 Structured events use an event name, UTC timestamp, and typed fields. Raw identifiers are collected only for local troubleshooting and are not intended for public reports.
 
-The log files under `%LOCALAPPDATA%\BTHaven\Logs` keep raw identifiers: they never leave the machine and exist to correlate a local failure with a device. The exported diagnostics ZIP is different. Each export derives an ephemeral pseudonym per identity — `redacted:<per-export token>:<sequence>` — so identifiers cannot be correlated across two ZIPs, while identifiers that matter for diagnosis — GATT, RFCOMM, and protocol UUIDs — are preserved verbatim. Device addresses, phone numbers, caller IDs, free text, and endpoint names are never written to the ZIP.
+The log files under `%LOCALAPPDATA%\BTHaven\Logs` keep raw identifiers to correlate a local failure with a device. There is no automated upload path, but users can copy or share them; raw logs are not suitable for public reports.
+
+Each exported diagnostics ZIP uses random per-export pseudonyms (`redacted:<per-export token>:<sequence>`) consistently across device data and logs, without including the identity map. Names and free-text errors are redacted, while GATT, RFCOMM and protocol UUIDs and diagnostic metadata are retained. Audio buffers, phone numbers and caller IDs are not collected for the export. This is pseudonymization, not full anonymity: retained timestamps, capabilities and other metadata can still identify or correlate devices across exports. Review the archive before sharing it.
 

@@ -4,25 +4,6 @@ param([switch]$TrustCertificateOnly)
 
 $ErrorActionPreference = 'Stop'
 
-# Before installation the signer is not trusted yet, so a healthy signature shows up
-# as UnknownError/NotTrusted. Accept those; reject damaged or unsigned packages.
-function Test-SignatureIntact {
-    param([Parameter(Mandatory)][System.Management.Automation.Signature]$Signature)
-
-    if (-not $Signature.SignerCertificate) { return $false }
-    if ($Signature.Status -eq 'Valid') { return $true }
-    if ($Signature.Status -notin 'UnknownError', 'NotTrusted') { return $false }
-
-    $chain = [Security.Cryptography.X509Certificates.X509Chain]::new()
-    try {
-        $null = $chain.Build($Signature.SignerCertificate)
-        $acceptable = 'UntrustedRoot', 'RevocationStatusUnknown', 'OfflineRevocation'
-        return @($chain.ChainStatus | Where-Object { $_.Status.ToString() -notin $acceptable }).Count -eq 0
-    } finally {
-        $chain.Dispose()
-    }
-}
-
 $packages = @(Get-ChildItem -LiteralPath $PSScriptRoot -File | Where-Object { $_.Extension -in '.msix', '.appx' })
 $certificates = @(Get-ChildItem -LiteralPath $PSScriptRoot -Filter '*.cer' -File)
 if ($packages.Count -ne 1 -or $certificates.Count -ne 1) {
@@ -47,8 +28,11 @@ try {
     }
     $signature = Get-AuthenticodeSignature -LiteralPath $package.FullName
     if (-not $signature.SignerCertificate -or $signature.SignerCertificate.Thumbprint -ne $certificate.Thumbprint -or
-        -not (Test-SignatureIntact -Signature $signature)) {
-        throw "Package signature is missing, damaged, or does not match the CER: $($signature.Status)."
+        $signature.Status -notin 'Valid', 'UnknownError', 'NotTrusted') {
+        throw "Package signature is missing, rejected, or does not match the CER: $($signature.Status)."
+    }
+    if ($signature.Status -ne 'Valid') {
+        Write-Warning "Package signature is UNVERIFIED ($($signature.Status)); its integrity cannot yet be certified. Trust requires your explicit approval, and installation requires a Valid signature afterward."
     }
     $storePath = "Cert:\LocalMachine\TrustedPeople\$($certificate.Thumbprint)"
     if ($TrustCertificateOnly) {
@@ -73,14 +57,16 @@ try {
         if ($process.ExitCode -ne 0 -or -not (Test-Path -LiteralPath $storePath)) { throw 'Certificate trust was not approved or failed.' }
     }
     $signature = Get-AuthenticodeSignature -LiteralPath $package.FullName
-    if ($signature.Status -ne 'Valid' -or $signature.SignerCertificate.Thumbprint -ne $certificate.Thumbprint) {
+    if ($signature.Status -ne 'Valid' -or -not $signature.SignerCertificate -or
+        $signature.SignerCertificate.Thumbprint -ne $certificate.Thumbprint) {
         throw "Package signature is not trusted and valid: $($signature.Status)."
     }
     $dependencies = @(Get-ChildItem -LiteralPath (Join-Path $PSScriptRoot 'Dependencies') -File -ErrorAction SilentlyContinue |
         Where-Object { $_.Extension -in '.appx', '.msix' })
     foreach ($dependency in $dependencies) {
-        if (-not (Test-SignatureIntact -Signature (Get-AuthenticodeSignature -LiteralPath $dependency.FullName))) {
-            throw "Damaged or unsigned dependency: $($dependency.Name)"
+        $dependencySignature = Get-AuthenticodeSignature -LiteralPath $dependency.FullName
+        if ($dependencySignature.Status -ne 'Valid') {
+            throw "Dependency signature must be trusted and Valid: $($dependency.Name) ($($dependencySignature.Status))."
         }
     }
     Write-Host "Package: $($package.FullName)`nSHA256: $((Get-FileHash -LiteralPath $package.FullName -Algorithm SHA256).Hash)"
