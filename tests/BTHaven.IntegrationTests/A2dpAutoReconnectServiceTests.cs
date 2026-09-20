@@ -175,6 +175,184 @@ public sealed class A2dpAutoReconnectServiceTests
         Assert.Equal(0, sink.DiscoveryCalls);
     }
 
+    [Fact]
+    [Trait("Category", "Integration")]
+    public async Task Overlapping_enables_drain_the_previous_loop_before_starting_another()
+    {
+        var sink = new FakeReconnectSink { HoldFirstDiscovery = true };
+        var delay = new ControlledDelay(completedCalls: 0);
+        await using var service = CreateService(sink, delay);
+        await service.EnableAsync("first");
+
+        var replacement = service.EnableAsync("second");
+        Task latest;
+        try
+        {
+            await sink.FirstDiscoveryCanceled.Task.WaitAsync(TimeSpan.FromSeconds(1));
+            latest = service.EnableAsync("third");
+
+            Assert.False(replacement.IsCompleted);
+            Assert.False(latest.IsCompleted);
+            Assert.Equal(1, sink.DiscoveryCalls);
+        }
+        finally
+        {
+            sink.ReleaseFirstDiscovery.TrySetResult(true);
+        }
+
+        await Task.WhenAll(replacement, latest).WaitAsync(TimeSpan.FromSeconds(1));
+        Assert.True(service.IsEnabled);
+        await service.DisableAsync().WaitAsync(TimeSpan.FromSeconds(1));
+        Assert.False(service.IsEnabled);
+        Assert.Equal(2, delay.CanceledDelays);
+    }
+
+    [Fact]
+    [Trait("Category", "Integration")]
+    public async Task Disable_during_replacement_waits_and_stops_the_replacement_loop()
+    {
+        var sink = new FakeReconnectSink { HoldFirstDiscovery = true };
+        var delay = new ControlledDelay(completedCalls: 0);
+        await using var service = CreateService(sink, delay);
+        await service.EnableAsync("first");
+
+        var replacement = service.EnableAsync("second");
+        Task disable;
+        try
+        {
+            await sink.FirstDiscoveryCanceled.Task.WaitAsync(TimeSpan.FromSeconds(1));
+            disable = service.DisableAsync();
+
+            Assert.False(disable.IsCompleted);
+        }
+        finally
+        {
+            sink.ReleaseFirstDiscovery.TrySetResult(true);
+        }
+
+        await Task.WhenAll(replacement, disable).WaitAsync(TimeSpan.FromSeconds(1));
+        Assert.False(service.IsEnabled);
+        Assert.Equal(1, delay.CanceledDelays);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    [Trait("Category", "Integration")]
+    public async Task Overlapping_stops_both_wait_for_the_running_loop(bool dispose)
+    {
+        var sink = new FakeReconnectSink { HoldFirstDiscovery = true };
+        var delay = new ControlledDelay(completedCalls: 0);
+        await using var service = CreateService(sink, delay);
+        await service.EnableAsync("target");
+
+        var first = dispose ? service.DisposeAsync().AsTask() : service.DisableAsync();
+        Task second;
+        try
+        {
+            await sink.FirstDiscoveryCanceled.Task.WaitAsync(TimeSpan.FromSeconds(1));
+            second = service.DisableAsync();
+
+            Assert.False(first.IsCompleted);
+            Assert.False(second.IsCompleted);
+        }
+        finally
+        {
+            sink.ReleaseFirstDiscovery.TrySetResult(true);
+        }
+
+        await Task.WhenAll(first, second).WaitAsync(TimeSpan.FromSeconds(1));
+        Assert.False(service.IsEnabled);
+        Assert.Equal(1, sink.DiscoveryCalls);
+    }
+
+    [Fact]
+    [Trait("Category", "Integration")]
+    public async Task Enable_canceled_while_draining_the_previous_loop_does_not_start_a_replacement()
+    {
+        var sink = new FakeReconnectSink { HoldFirstDiscovery = true };
+        var delay = new ControlledDelay(completedCalls: 0);
+        await using var service = CreateService(sink, delay);
+        using var cancellation = new CancellationTokenSource();
+        await service.EnableAsync("first");
+
+        var replacement = service.EnableAsync("second", cancellation.Token);
+        try
+        {
+            await sink.FirstDiscoveryCanceled.Task.WaitAsync(TimeSpan.FromSeconds(1));
+            cancellation.Cancel();
+        }
+        finally
+        {
+            sink.ReleaseFirstDiscovery.TrySetResult(true);
+        }
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(
+            () => replacement.WaitAsync(TimeSpan.FromSeconds(1)));
+        Assert.False(service.IsEnabled);
+        Assert.Equal(1, sink.DiscoveryCalls);
+    }
+
+    [Fact]
+    [Trait("Category", "Integration")]
+    public async Task Enable_canceled_while_waiting_for_disable_does_not_wait_for_the_old_loop()
+    {
+        var sink = new FakeReconnectSink { HoldFirstDiscovery = true };
+        var delay = new ControlledDelay(completedCalls: 0);
+        await using var service = CreateService(sink, delay);
+        using var cancellation = new CancellationTokenSource();
+        await service.EnableAsync("first");
+
+        var disable = service.DisableAsync();
+        try
+        {
+            await sink.FirstDiscoveryCanceled.Task.WaitAsync(TimeSpan.FromSeconds(1));
+            var replacement = service.EnableAsync("second", cancellation.Token);
+            cancellation.Cancel();
+
+            await Assert.ThrowsAnyAsync<OperationCanceledException>(
+                () => replacement.WaitAsync(TimeSpan.FromSeconds(1)));
+            Assert.False(disable.IsCompleted);
+            Assert.Equal(1, sink.DiscoveryCalls);
+        }
+        finally
+        {
+            sink.ReleaseFirstDiscovery.TrySetResult(true);
+        }
+
+        await disable.WaitAsync(TimeSpan.FromSeconds(1));
+        Assert.False(service.IsEnabled);
+    }
+
+    [Fact]
+    [Trait("Category", "Integration")]
+    public async Task Dispose_rejects_overlapping_and_subsequent_enables()
+    {
+        var sink = new FakeReconnectSink { HoldFirstDiscovery = true };
+        var delay = new ControlledDelay(completedCalls: 0);
+        await using var service = CreateService(sink, delay);
+        await service.EnableAsync("first");
+
+        var dispose = service.DisposeAsync().AsTask();
+        Task replacement;
+        try
+        {
+            await sink.FirstDiscoveryCanceled.Task.WaitAsync(TimeSpan.FromSeconds(1));
+            replacement = service.EnableAsync("second");
+        }
+        finally
+        {
+            sink.ReleaseFirstDiscovery.TrySetResult(true);
+        }
+
+        await dispose.WaitAsync(TimeSpan.FromSeconds(1));
+        await Assert.ThrowsAsync<ObjectDisposedException>(
+            () => replacement.WaitAsync(TimeSpan.FromSeconds(1)));
+        await Assert.ThrowsAsync<ObjectDisposedException>(() => service.EnableAsync("third"));
+        Assert.False(service.IsEnabled);
+        Assert.Equal(1, sink.DiscoveryCalls);
+    }
+
     private static A2dpAutoReconnectService CreateService(
         FakeReconnectSink sink,
         ControlledDelay delay,
@@ -274,6 +452,15 @@ public sealed class A2dpAutoReconnectServiceTests
     private sealed class FakeReconnectSink : IA2dpReconnectSink
     {
         private Action<MediaAudioSinkState>? stateChanged;
+        private int discoveryCalls;
+
+        public bool HoldFirstDiscovery { get; init; }
+
+        public TaskCompletionSource<bool> FirstDiscoveryCanceled { get; } =
+            new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public TaskCompletionSource<bool> ReleaseFirstDiscovery { get; } =
+            new(TaskCreationOptions.RunContinuationsAsynchronously);
 
         public IReadOnlyList<RemoteAudioDeviceInfo> AvailableDevices { get; init; } = [];
 
@@ -291,7 +478,7 @@ public sealed class A2dpAutoReconnectServiceTests
 
         public MediaAudioSinkState State { get; private set; } = MediaAudioSinkState.Disabled;
 
-        public int DiscoveryCalls { get; private set; }
+        public int DiscoveryCalls => Volatile.Read(ref discoveryCalls);
 
         public int ConnectCalls { get; private set; }
 
@@ -305,11 +492,18 @@ public sealed class A2dpAutoReconnectServiceTests
             remove => stateChanged -= value;
         }
 
-        public Task<IReadOnlyList<RemoteAudioDeviceInfo>> GetAvailableDevicesAsync(CancellationToken cancellationToken = default)
+        public async Task<IReadOnlyList<RemoteAudioDeviceInfo>> GetAvailableDevicesAsync(CancellationToken cancellationToken = default)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            DiscoveryCalls++;
-            return Task.FromResult(AvailableDevices);
+            if (Interlocked.Increment(ref discoveryCalls) == 1 && HoldFirstDiscovery)
+            {
+                using var registration = cancellationToken.Register(
+                    () => FirstDiscoveryCanceled.TrySetResult(true));
+                // Model a native operation that observes cancellation only after returning.
+                await ReleaseFirstDiscovery.Task.ConfigureAwait(false);
+                cancellationToken.ThrowIfCancellationRequested();
+            }
+            return AvailableDevices;
         }
 
         public Task<bool> ConnectAsync(string requestedDeviceId, CancellationToken cancellationToken = default)

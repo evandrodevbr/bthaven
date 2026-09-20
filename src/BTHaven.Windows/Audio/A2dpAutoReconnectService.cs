@@ -20,12 +20,14 @@ internal interface IA2dpReconnectSink
 public sealed class A2dpAutoReconnectService : IAsyncDisposable
 {
     private readonly object sync = new();
+    private readonly SemaphoreSlim lifecycleGate = new(1, 1);
     private readonly IA2dpReconnectSink sink;
     private readonly IWindowsDiagnosticLogger logger;
     private readonly Func<TimeSpan, CancellationToken, Task> delayAsync;
     private readonly TimeSpan stateChangeTimeout;
     private CancellationTokenSource? cancellation;
     private Task? loop;
+    private bool disposed;
 
     public A2dpAutoReconnectService(
         A2dpSinkService sink,
@@ -68,22 +70,60 @@ public sealed class A2dpAutoReconnectService : IAsyncDisposable
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(requestedDeviceId);
         cancellationToken.ThrowIfCancellationRequested();
-        await DisableAsync().ConfigureAwait(false);
+        await lifecycleGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            ObjectDisposedException.ThrowIf(disposed, this);
+            await StopLoopAsync().ConfigureAwait(false);
+            cancellationToken.ThrowIfCancellationRequested();
 
-        var source = new CancellationTokenSource();
-        lock (sync)
-        {
-            cancellation = source;
+            var source = new CancellationTokenSource();
+            lock (sync)
+            {
+                cancellation = source;
+            }
             loop = RunAsync(requestedDeviceId, source.Token);
+            logger.Info("A2DP.AutoReconnect.Enabled", new Dictionary<string, object?>
+            {
+                ["deviceId"] = requestedDeviceId,
+                ["schedule"] = "1s,2s,5s,10s,30s,60s",
+            });
         }
-        logger.Info("A2DP.AutoReconnect.Enabled", new Dictionary<string, object?>
+        finally
         {
-            ["deviceId"] = requestedDeviceId,
-            ["schedule"] = "1s,2s,5s,10s,30s,60s",
-        });
+            lifecycleGate.Release();
+        }
     }
 
     public async Task DisableAsync()
+    {
+        await lifecycleGate.WaitAsync().ConfigureAwait(false);
+        try
+        {
+            await StopLoopAsync().ConfigureAwait(false);
+        }
+        finally
+        {
+            lifecycleGate.Release();
+        }
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        await lifecycleGate.WaitAsync().ConfigureAwait(false);
+        try
+        {
+            disposed = true;
+            await StopLoopAsync().ConfigureAwait(false);
+        }
+        finally
+        {
+            lifecycleGate.Release();
+        }
+    }
+
+    // Call only while holding lifecycleGate; never reacquire it while draining a loop.
+    private async Task StopLoopAsync()
     {
         CancellationTokenSource? source;
         Task? running;
@@ -100,22 +140,27 @@ public sealed class A2dpAutoReconnectService : IAsyncDisposable
             return;
         }
 
-        source.Cancel();
-        if (running is not null)
+        try
         {
-            try
+            source.Cancel();
+            if (running is not null)
             {
-                await running.ConfigureAwait(false);
-            }
-            catch (OperationCanceledException) when (source.IsCancellationRequested)
-            {
+                try
+                {
+                    await running.ConfigureAwait(false);
+                }
+                catch (OperationCanceledException) when (source.IsCancellationRequested)
+                {
+                }
             }
         }
-        source.Dispose();
+        finally
+        {
+            source.Dispose();
+        }
         logger.Info("A2DP.AutoReconnect.Disabled");
     }
 
-    public ValueTask DisposeAsync() => new(DisableAsync());
 
     private async Task RunAsync(string requestedDeviceId, CancellationToken cancellationToken)
     {
