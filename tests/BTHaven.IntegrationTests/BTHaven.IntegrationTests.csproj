@@ -15,5 +15,7 @@
   </ItemGroup>
   <ItemGroup>
     <Compile Include="../../src/BTHaven.App/BatteryTextFormatter.cs" Link="BatteryTextFormatter.cs" />
+    <Compile Include="../../src/BTHaven.App/OperationLifetime.cs" Link="OperationLifetime.cs" />
+    <Compile Include="../../src/BTHaven.App/MediaConnectionCoordinator.cs" Link="MediaConnectionCoordinator.cs" />
   </ItemGroup>
 </Project>

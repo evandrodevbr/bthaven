@@ -1,4 +1,3 @@
-using System.Collections.Concurrent;
 using System.Collections.ObjectModel;
 using BTHaven.Core.Audio;
 using BTHaven.Core.Calls;
@@ -30,21 +29,20 @@ public sealed partial class MainPage : Page
     private readonly Dictionary<string, BluetoothDeviceModel> devices = new(StringComparer.OrdinalIgnoreCase);
     private readonly CancellationTokenSource lifetime = new();
     private readonly SemaphoreSlim refreshGate = new(1, 1);
-    private Task? watchTask;
+    private readonly OperationLifetime operations = new();
+    private readonly MediaConnectionCoordinator media;
+    private ContentDialog? activeDialog;
     private string? selectedDeviceId;
     private string? selectedA2dpDeviceId;
     private string? selectedHfpTransportId;
     private string? selectedOutputEndpointId;
     private BluetoothDeviceInspectionSnapshot? selectedInspection;
     private RemoteVolumeStatus? remoteVolumeStatus;
-    private string? activeMediaDeviceId;
     private bool suppressMediaToggleEvents;
     private bool loaded;
     private bool ready;
     private bool isCompactLayout;
     private bool disposed;
-    private readonly Dictionary<string, string> a2dpLogicalDeviceIds = new(StringComparer.OrdinalIgnoreCase);
-    private readonly ConcurrentDictionary<string, byte> invalidatedA2dpDeviceIds = new(StringComparer.OrdinalIgnoreCase);
 
     public ObservableCollection<DeviceRowViewModel> Rows { get; } = [];
 
@@ -63,6 +61,7 @@ public sealed partial class MainPage : Page
         a2dpService = new A2dpSinkService(logger);
         a2dpService.StateChanged += A2dpService_StateChanged;
         autoReconnectService = new A2dpAutoReconnectService(a2dpService, logger);
+        media = new MediaConnectionCoordinator(a2dpService, autoReconnectService);
         hfpService = new HfpPhoneTransportService(logger);
         remoteVolumeService = new WindowsRemoteVolumeService(logger);
         deviceInspector = new BluetoothDeviceInspector(
@@ -84,7 +83,10 @@ public sealed partial class MainPage : Page
         Unloaded += MainPage_Unloaded;
     }
 
-    private async void MainPage_Loaded(object sender, RoutedEventArgs e)
+    private void MainPage_Loaded(object sender, RoutedEventArgs e) =>
+        _ = RunOperationAsync(LoadAsync);
+
+    private async Task LoadAsync()
     {
         logger.Info("App.MainPage.Loaded", new Dictionary<string, object?>
         {
@@ -97,67 +99,58 @@ public sealed partial class MainPage : Page
 
         loaded = true;
         await RefreshAsync();
-        watchTask = ConsumeDeviceChangesAsync(lifetime.Token);
+        _ = RunOperationAsync(() => ConsumeDeviceChangesAsync(lifetime.Token));
         logger.Info("App.DeviceWatch.Started");
     }
 
-    private void MainPage_Unloaded(object sender, RoutedEventArgs e)
+    private async void MainPage_Unloaded(object sender, RoutedEventArgs e)
     {
         // Unloaded e evento da arvore visual (Hide()/minimizar nao o disparam); o
         // teardown definitivo mora em ShutdownAsync, chamado por ExitApplication antes
         // de Close(). Este e apenas o fallback de fechamento real.
         if (MainWindow.IsShuttingDown)
         {
-            _ = ShutdownAsync();
+            try { await ShutdownAsync(); }
+            catch (Exception exception) { logger.Error("App.Shutdown.Failed", exception); }
         }
     }
 
-    public async Task ShutdownAsync()
-    {
-        if (disposed)
+    public Task ShutdownAsync() => operations.ShutdownAsync(
+        () =>
         {
-            return;
-        }
+            disposed = true;
+            selectionEpoch++;
+            a2dpService.StateChanged -= A2dpService_StateChanged;
+            batteryTelemetry.Changed -= BatteryTelemetry_Changed;
+            // Dialogs otherwise keep tracked operations alive until user input.
+            try { activeDialog?.Hide(); }
+            finally { lifetime.Cancel(); }
+        },
+        () => autoReconnectService.DisposeAsync(),
+        () => a2dpService.DisposeAsync(),
+        () => hfpService.DisposeAsync(),
+        () => deviceManager.DisposeAsync(),
+        () => batteryService.DisposeAsync(),
+        () =>
+        {
+            lifetime.Dispose();
+            refreshGate.Dispose();
+            media.Dispose();
+            logger.Info("App.MainPage.Disposed");
+            return ValueTask.CompletedTask;
+        });
 
-        logger.Info("App.MainPage.Shutdown");
-        disposed = true;
-        lifetime.Cancel();
-        try
+    private Task RunOperationAsync(Func<Task> operation) =>
+        operations.RunAsync(async () =>
         {
-            if (watchTask is not null)
-            {
-                await watchTask;
-            }
-        }
-        catch (OperationCanceledException) when (lifetime.IsCancellationRequested)
-        {
-            logger.Debug("App.DeviceWatch.CancelledDuringShutdown");
-        }
-        catch (Exception exception)
-        {
-            logger.Error("App.DeviceWatch.ShutdownFailed", exception);
-        }
-        finally
-        {
-            try
-            {
-                a2dpService.StateChanged -= A2dpService_StateChanged;
-                batteryTelemetry.Changed -= BatteryTelemetry_Changed;
-                await deviceManager.DisposeAsync();
-                await batteryService.DisposeAsync();
-                await autoReconnectService.DisposeAsync();
-                await a2dpService.DisposeAsync();
-                await hfpService.DisposeAsync();
-                logger.Info("App.MainPage.Disposed");
-            }
-            catch (Exception exception)
-            {
-                logger.Error("App.Services.DisposeFailed", exception);
-            }
-        }
-    }
+            try { await operation(); }
+            catch (OperationCanceledException) when (lifetime.IsCancellationRequested) { }
+            catch (Exception exception) { logger.Error("App.Operation.Failed", exception); }
+        });
 
-    private async Task RefreshAsync()
+    private Task RefreshAsync() => RunOperationAsync(RefreshCoreAsync);
+
+    private async Task RefreshCoreAsync()
     {
         await refreshGate.WaitAsync(lifetime.Token);
         logger.Info("App.Refresh.Started", new Dictionary<string, object?>
@@ -181,17 +174,7 @@ public sealed partial class MainPage : Page
             {
                 devices[device.Id] = device;
             }
-            foreach (var mapping in a2dpLogicalDeviceIds
-                         .Where(mapping => !devices.ContainsKey(mapping.Value))
-                         .Select(mapping => mapping.Key)
-                         .ToArray())
-            {
-                a2dpLogicalDeviceIds.Remove(mapping);
-            }
-            if (activeMediaDeviceId is not null && !devices.ContainsKey(activeMediaDeviceId))
-            {
-                activeMediaDeviceId = null;
-            }
+            media.Prune(devices);
             var selectedConnectionChanged = previousSelectedDevice is not null
                 && devices.TryGetValue(previousSelectedDevice.Id, out var refreshedSelectedDevice)
                 && !HasSameConnectionProvenance(previousSelectedDevice, refreshedSelectedDevice);
@@ -295,6 +278,7 @@ public sealed partial class MainPage : Page
             {
                 DispatcherQueue.TryEnqueue(() =>
                 {
+                    if (disposed) return;
                     StatusInfoBar.Severity = InfoBarSeverity.Error;
                     StatusInfoBar.Message = $"O watcher de dispositivos foi interrompido: {exception.Message}";
                 });
@@ -304,6 +288,7 @@ public sealed partial class MainPage : Page
 
     private void ApplyDeviceChange(BluetoothDeviceChange change)
     {
+        if (disposed) return;
         logger.Info("App.DeviceChange.Applying", new Dictionary<string, object?>
         {
             ["kind"] = change.Kind.ToString(),
@@ -321,29 +306,18 @@ public sealed partial class MainPage : Page
         if (change.Kind == BluetoothDeviceChangeKind.Removed)
         {
             var selectedTargetMapsRemovedDevice = selectedA2dpDeviceId is not null
-                && a2dpLogicalDeviceIds.TryGetValue(selectedA2dpDeviceId, out var mappedDeviceId)
-                && SameId(mappedDeviceId, change.DeviceId);
+                && media.MapsTo(selectedA2dpDeviceId, change.DeviceId);
             var selectedTargetIsRemovedEndpoint = selectedA2dpDeviceId is not null
                 && !string.IsNullOrWhiteSpace(change.EndpointId)
                 && SameId(selectedA2dpDeviceId, change.EndpointId);
 
             devices.Remove(change.DeviceId);
-            foreach (var mapping in a2dpLogicalDeviceIds
-                         .Where(mapping => SameId(mapping.Value, change.DeviceId))
-                         .Select(mapping => mapping.Key)
-                         .ToArray())
-            {
-                a2dpLogicalDeviceIds.Remove(mapping);
-            }
+            media.RemoveDevice(change.DeviceId);
             if (selectedTargetMapsRemovedDevice || selectedTargetIsRemovedEndpoint)
             {
                 selectedA2dpDeviceId = null;
                 MediaAudioButton.IsEnabled = false;
                 A2dpTargetText.Text = "Alvo A2DP removido; aguardando nova consulta";
-            }
-            if (SameId(activeMediaDeviceId, change.DeviceId))
-            {
-                activeMediaDeviceId = null;
             }
         }
         else if (change.Device is not null)
@@ -372,8 +346,7 @@ public sealed partial class MainPage : Page
                     && !string.IsNullOrWhiteSpace(change.EndpointId)
                     && SameId(selectedA2dpDeviceId, change.EndpointId);
                 var selectedTargetMappingsChangedDevice = selectedA2dpDeviceId is not null
-                    && a2dpLogicalDeviceIds.TryGetValue(selectedA2dpDeviceId, out var mappedDeviceId)
-                    && !SameId(mappedDeviceId, change.DeviceId);
+                    && media.MapsToDifferentDevice(selectedA2dpDeviceId, change.DeviceId);
                 if (selectedTargetIsUpdatedEndpoint || selectedTargetMappingsChangedDevice)
                 {
                     selectedA2dpDeviceId = null;
@@ -414,139 +387,23 @@ public sealed partial class MainPage : Page
 
     private void A2dpService_StateChanged(MediaAudioSinkState state)
     {
-        if (disposed)
-        {
-            return;
-        }
-
-        var eventDeviceId = a2dpService.DeviceId;
-        var observedServiceState = a2dpService.State;
-        var bindingInvalidated = eventDeviceId is not null
-            && invalidatedA2dpDeviceIds.ContainsKey(eventDeviceId);
-        var mappedLogicalDeviceId = !bindingInvalidated
-            && eventDeviceId is not null
-            && a2dpLogicalDeviceIds.TryGetValue(eventDeviceId, out var mappedDeviceId)
-            && devices.ContainsKey(mappedDeviceId)
-            ? mappedDeviceId
-            : null;
-        var matchingLogicalIds = !bindingInvalidated
-            && state == MediaAudioSinkState.Opened
-            && eventDeviceId is not null
-            ? devices.Values
-                .Where(device => device.Endpoints.Any(endpoint =>
-                    string.Equals(endpoint.Id, eventDeviceId, StringComparison.OrdinalIgnoreCase)))
-                .Select(device => device.Id)
-                .Distinct(StringComparer.OrdinalIgnoreCase)
-                .ToArray()
-            : [];
-        var logicalDeviceId = mappedLogicalDeviceId
-            ?? (matchingLogicalIds.Length == 1 ? matchingLogicalIds[0] : null);
-        logger.Debug("App.A2DP.StateChanged", new Dictionary<string, object?>
-        {
-            ["state"] = state.ToString(),
-            ["deviceId"] = eventDeviceId,
-            ["logicalDeviceId"] = logicalDeviceId,
-        });
-
-        void ApplyState()
-        {
-            if (disposed || a2dpService.State != observedServiceState)
+        var targetId = a2dpService.DeviceId;
+        if (!DispatcherQueue.TryEnqueue(() =>
             {
-                return;
-            }
-            if (state == MediaAudioSinkState.Opened
-                && !string.Equals(a2dpService.DeviceId, eventDeviceId, StringComparison.OrdinalIgnoreCase))
-            {
-                return;
-            }
-
-            if (state == MediaAudioSinkState.Opened)
-            {
-                if (logicalDeviceId is null || eventDeviceId is null)
+                if (!disposed && media.ApplyState(state, targetId, devices))
                 {
-                    logger.Warning("App.A2DP.StateChange.Unresolved", new Dictionary<string, object?>
-                    {
-                        ["deviceId"] = eventDeviceId,
-                        ["matchingLogicalCount"] = matchingLogicalIds.Length,
-                    });
-                    return;
+                    RefreshRows();
                 }
-
-                activeMediaDeviceId = logicalDeviceId;
-            }
-            else if (state is MediaAudioSinkState.Disabled or MediaAudioSinkState.Failed)
-            {
-                if (autoReconnectService.IsEnabled && activeMediaDeviceId is not null)
-                {
-                    logger.Info("App.A2DP.StateChanged.WaitingForReconnect", new Dictionary<string, object?>
-                    {
-                        ["state"] = state.ToString(),
-                        ["logicalDeviceId"] = activeMediaDeviceId,
-                    });
-                }
-                else
-                {
-                    activeMediaDeviceId = null;
-                }
-            }
-
-            RefreshRows();
-        }
-
-        if (!DispatcherQueue.TryEnqueue(ApplyState))
+            }))
         {
-            logger.Warning("App.A2DP.StateChange.NotApplied", new Dictionary<string, object?>
-            {
-                ["state"] = state.ToString(),
-                ["reason"] = "DispatcherQueue was unavailable",
-            });
+            logger.Warning("App.A2DP.StateChange.NotApplied");
         }
-    }
-
-    private void BindA2dpTarget(string targetId, string logicalDeviceId)
-    {
-        a2dpLogicalDeviceIds[targetId] = logicalDeviceId;
-        invalidatedA2dpDeviceIds.TryRemove(targetId, out _);
-    }
-
-    private void ClearA2dpBindingsForLogicalDevice(string logicalDeviceId)
-    {
-        foreach (var targetId in a2dpLogicalDeviceIds
-                     .Where(binding => string.Equals(binding.Value, logicalDeviceId, StringComparison.OrdinalIgnoreCase))
-                     .Select(binding => binding.Key)
-                     .ToArray())
-        {
-            InvalidateA2dpTarget(targetId);
-        }
-    }
-
-    private void ClearA2dpBindings()
-    {
-        foreach (var targetId in a2dpLogicalDeviceIds.Keys.ToArray())
-        {
-            InvalidateA2dpTarget(targetId);
-        }
-        InvalidateCurrentA2dpTarget();
-    }
-
-    private void InvalidateCurrentA2dpTarget()
-    {
-        if (a2dpService.DeviceId is { } targetId)
-        {
-            InvalidateA2dpTarget(targetId);
-        }
-    }
-
-    private void InvalidateA2dpTarget(string targetId)
-    {
-        a2dpLogicalDeviceIds.Remove(targetId);
-        invalidatedA2dpDeviceIds.TryAdd(targetId, 0);
     }
 
 
     private void DeviceList_SelectionChanged(object sender, SelectionChangedEventArgs e)
     {
-        if (isReconcilingSelection)
+        if (disposed || isReconcilingSelection)
         {
             return;
         }
@@ -565,7 +422,10 @@ public sealed partial class MainPage : Page
     }
 
 
-    private async Task RefreshSelectedDeviceCapabilitiesAsync(string deviceId, long epoch)
+    private Task RefreshSelectedDeviceCapabilitiesAsync(string deviceId, long epoch) =>
+        RunOperationAsync(() => RefreshSelectedDeviceCapabilitiesCoreAsync(deviceId, epoch));
+
+    private async Task RefreshSelectedDeviceCapabilitiesCoreAsync(string deviceId, long epoch)
     {
         try
         {
@@ -589,11 +449,9 @@ public sealed partial class MainPage : Page
             }
 
             var matchingTargets = BluetoothDeviceCorrelation.FindMatches(device, audioTargets);
-            if (matchingTargets.Length == 1
-                && !string.IsNullOrWhiteSpace(matchingTargets[0].Id)
-                && !invalidatedA2dpDeviceIds.ContainsKey(matchingTargets[0].Id))
+            if (matchingTargets.Length == 1)
             {
-                a2dpLogicalDeviceIds[matchingTargets[0].Id] = device.Id;
+                media.ObserveTarget(matchingTargets[0].Id, device.Id);
             }
             selectedA2dpDeviceId = matchingTargets.Length == 1 ? matchingTargets[0].Id : null;
             A2dpTargetText.Text = matchingTargets.Length switch
@@ -698,25 +556,18 @@ public sealed partial class MainPage : Page
         }
     }
 
-    private async void RefreshButton_Click(object sender, RoutedEventArgs e)
-    {
-        logger.Info("App.RefreshButton.Clicked");
-        await RefreshAsync();
-    }
+    private void RefreshButton_Click(object sender, RoutedEventArgs e) =>
+        _ = RefreshAsync();
 
-    private async void DiagnosticsButton_Click(object sender, RoutedEventArgs e)
-    {
-        logger.Info("App.DiagnosticsButton.Clicked");
-        await ShowDiagnosticsAsync();
-    }
+    private void DiagnosticsButton_Click(object sender, RoutedEventArgs e) =>
+        _ = ShowDiagnosticsAsync();
 
-    private async void LogsButton_Click(object sender, RoutedEventArgs e)
-    {
-        logger.Info("App.LogsButton.Clicked");
-        await ShowLogsAsync();
-    }
+    private void LogsButton_Click(object sender, RoutedEventArgs e) =>
+        _ = ShowLogsAsync();
 
-    public async Task ShowDiagnosticsAsync()
+    public Task ShowDiagnosticsAsync() => RunOperationAsync(ShowDiagnosticsCoreAsync);
+
+    private async Task ShowDiagnosticsCoreAsync()
     {
         DiagnosticsButton.IsEnabled = false;
         logger.Info("App.Diagnostics.Opened");
@@ -748,7 +599,7 @@ public sealed partial class MainPage : Page
                 DefaultButton = ContentDialogButton.Primary,
                 XamlRoot = XamlRoot,
             };
-            if (await dialog.ShowAsync() == ContentDialogResult.Primary)
+            if (await ShowDialogAsync(dialog) == ContentDialogResult.Primary)
             {
                 var path = await diagnosticsExporter.ExportAsync(lifetime.Token);
                 StatusInfoBar.Severity = InfoBarSeverity.Success;
@@ -771,7 +622,9 @@ public sealed partial class MainPage : Page
         }
     }
 
-    public async Task ShowLogsAsync()
+    public Task ShowLogsAsync() => RunOperationAsync(ShowLogsCoreAsync);
+
+    private async Task ShowLogsCoreAsync()
     {
         var lines = logger.ReadRecent(maxLines: 1000, redactSensitive: false);
         logger.Info("App.LogViewer.Opened", new Dictionary<string, object?>
@@ -804,11 +657,20 @@ public sealed partial class MainPage : Page
             CloseButtonText = "Fechar",
             XamlRoot = XamlRoot,
         };
-        await dialog.ShowAsync();
+        await ShowDialogAsync(dialog);
         logger.Info("App.LogViewer.Closed", new Dictionary<string, object?>
         {
             ["displayedLines"] = lines.Count,
         });
+    }
+
+    private async Task<ContentDialogResult> ShowDialogAsync(ContentDialog dialog)
+    {
+        lifetime.Token.ThrowIfCancellationRequested();
+        if (activeDialog is not null) return ContentDialogResult.None;
+        activeDialog = dialog;
+        try { return await dialog.ShowAsync(); }
+        finally { activeDialog = null; }
     }
 
     private void FilterComboBox_SelectionChanged(object sender, SelectionChangedEventArgs e)
@@ -818,14 +680,16 @@ public sealed partial class MainPage : Page
         {
             ["filter"] = filter.ToString(),
         });
-        if (loaded)
+        if (loaded && !disposed)
         {
             RefreshRows();
             RefreshVisibleBatteryTelemetry(onlyMissing: true);
         }
     }
+    private void MediaAudioButton_Click(object sender, RoutedEventArgs e) =>
+        _ = RunOperationAsync(MediaAudioAsync);
 
-    private async void MediaAudioButton_Click(object sender, RoutedEventArgs e)
+    private async Task MediaAudioAsync()
     {
         logger.Info("App.MediaAudioButton.Clicked", new Dictionary<string, object?>
         {
@@ -848,31 +712,19 @@ public sealed partial class MainPage : Page
             return;
         }
 
-        BindA2dpTarget(requestedA2dpDeviceId, requestedDeviceId);
         MediaAudioButton.IsEnabled = false;
         try
         {
-            await autoReconnectService.DisableAsync();
+            var connected = await media.ConnectAsync(
+                requestedDeviceId, requestedA2dpDeviceId,
+                AutoReconnectCheckBox.IsChecked == true, lifetime.Token,
+                () => IsCurrentSelection(requestedDeviceId, epoch));
             if (!IsCurrentSelection(requestedDeviceId, epoch))
             {
                 return;
-            }
-            var connected = await a2dpService.ConnectAsync(requestedA2dpDeviceId, lifetime.Token);
-            if (!IsCurrentSelection(requestedDeviceId, epoch))
-            {
-                return;
-            }
-            if (connected && AutoReconnectCheckBox.IsChecked == true)
-            {
-                await autoReconnectService.EnableAsync(requestedA2dpDeviceId, lifetime.Token);
-                if (!IsCurrentSelection(requestedDeviceId, epoch))
-                {
-                    return;
-                }
             }
             if (connected)
             {
-                activeMediaDeviceId = requestedDeviceId;
                 RefreshRows();
             }
             var endpoint = OutputEndpointComboBox.SelectedItem as AudioEndpointModel;
@@ -918,7 +770,12 @@ public sealed partial class MainPage : Page
         }
     }
 
-    private async void AutoReconnectCheckBox_Changed(object sender, RoutedEventArgs e)
+    private void AutoReconnectCheckBox_Changed(object sender, RoutedEventArgs e)
+    {
+        if (ready) _ = RunOperationAsync(UpdateAutoReconnectAsync);
+    }
+
+    private async Task UpdateAutoReconnectAsync()
     {
         if (!ready)
         {
@@ -932,25 +789,14 @@ public sealed partial class MainPage : Page
             ["deviceId"] = selectedDeviceId,
             ["a2dpDeviceId"] = selectedA2dpDeviceId,
         });
-        if (enabled && selectedA2dpDeviceId is not null)
-        {
-            if (selectedDeviceId is not null)
-            {
-                BindA2dpTarget(selectedA2dpDeviceId, selectedDeviceId);
-            }
-            await autoReconnectService.EnableAsync(selectedA2dpDeviceId, lifetime.Token);
-        }
-        else
-        {
-            if (!enabled)
-            {
-                ClearA2dpBindings();
-            }
-            await autoReconnectService.DisableAsync();
-        }
+        await media.SetReconnectAsync(
+            enabled, selectedDeviceId, selectedA2dpDeviceId, lifetime.Token);
     }
 
-    private async void HfpEnableButton_Click(object sender, RoutedEventArgs e)
+    private void HfpEnableButton_Click(object sender, RoutedEventArgs e) =>
+        _ = RunOperationAsync(EnableHfpAsync);
+
+    private async Task EnableHfpAsync()
     {
         var requestedDeviceId = selectedDeviceId;
         var requestedTransportId = selectedHfpTransportId;
@@ -1174,6 +1020,10 @@ public sealed partial class MainPage : Page
 
     private void RenderSelection(BluetoothDeviceModel device)
     {
+        SelectionEmptyState.Visibility = Visibility.Collapsed;
+        DeviceDetailContent.Visibility = Visibility.Visible;
+        SelectedDeviceStatus.Visibility = Visibility.Visible;
+        DetailSelectorBar.Visibility = Visibility.Visible;
         SelectedDeviceName.Text = device.Name;
         SelectedDeviceSubtitle.Text = $"{device.Category} · observado em {device.LastUpdated.ToLocalTime():HH:mm:ss}";
         var connectedEndpointCount = device.Endpoints.Count(endpoint => endpoint.IsConnected == true);
@@ -1206,8 +1056,12 @@ public sealed partial class MainPage : Page
 
     private void ClearSelection()
     {
+        SelectionEmptyState.Visibility = Visibility.Visible;
+        DeviceDetailContent.Visibility = Visibility.Collapsed;
+        SelectedDeviceStatus.Visibility = Visibility.Collapsed;
+        DetailSelectorBar.Visibility = Visibility.Collapsed;
         SelectedDeviceName.Text = "Selecione um dispositivo";
-        SelectedDeviceSubtitle.Text = "A lista usa observações do Windows, sem polling agressivo.";
+        SelectedDeviceSubtitle.Text = "Escolha um dispositivo na lista para consultar seus detalhes e controles de áudio.";
         ConnectionStateText.Text = "—";
         TransportText.Text = "—";
         ConnectionTransportText.Text = "—";

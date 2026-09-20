@@ -83,7 +83,7 @@ public sealed partial class MainPage
                 Rows.Add(new DeviceRowViewModel(
                     device,
                     telemetry,
-                    SameId(activeMediaDeviceId, device.Id)));
+                    SameId(media.ActiveDeviceId, device.Id)));
             }
         }
         finally
@@ -135,7 +135,7 @@ public sealed partial class MainPage
     }
 
     private bool IsCurrentSelection(string deviceId, long epoch) =>
-        epoch == selectionEpoch
+        !disposed && epoch == selectionEpoch
         && SameId(selectedDeviceId, deviceId)
         && devices.ContainsKey(deviceId);
 

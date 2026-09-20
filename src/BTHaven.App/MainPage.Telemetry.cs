@@ -89,7 +89,7 @@ public sealed partial class MainPage
             return;
         }
 
-        _ = ObserveBatteryTelemetryRefreshAsync(devicesToRefresh, priorityDeviceId);
+        _ = RunOperationAsync(() => ObserveBatteryTelemetryRefreshAsync(devicesToRefresh, priorityDeviceId));
     }
 
     private async Task ObserveBatteryTelemetryRefreshAsync(

@@ -7,6 +7,8 @@ namespace BTHaven_App;
 public sealed partial class MainWindow : Window
 {
     private bool allowClose;
+    private Task? exitTask;
+    private bool trayDisposed;
     private readonly TraceDiagnosticLogger logger = TraceDiagnosticLogger.Instance;
 
     public static bool IsShuttingDown { get; private set; }
@@ -44,7 +46,7 @@ public sealed partial class MainWindow : Window
 
     private void MainWindow_Closed(object sender, WindowEventArgs args)
     {
-        TrayIcon.Dispose();
+        DisposeTray();
         logger.Info("App.MainWindow.Closed");
     }
 
@@ -56,16 +58,23 @@ public sealed partial class MainWindow : Window
 
     private async void TrayDiagnostics_Click(object sender, RoutedEventArgs e)
     {
-        logger.Info("App.Tray.DiagnosticsClicked");
-        ShowFromTray();
-        if (RootFrame.Content is MainPage page)
+        if (IsShuttingDown) return;
+        try
         {
-            await page.ShowDiagnosticsAsync();
+            logger.Info("App.Tray.DiagnosticsClicked");
+            ShowFromTray();
+            if (RootFrame.Content is MainPage page)
+            {
+                await page.ShowDiagnosticsAsync();
+            }
         }
+        catch (OperationCanceledException) when (IsShuttingDown) { }
+        catch (Exception exception) { logger.Error("App.Tray.DiagnosticsFailed", exception); }
     }
 
     private void ShowFromTray()
     {
+        if (IsShuttingDown) return;
         // Activate() nao restaura janela minimizada; sem isso, "Abrir" pela bandeja
         // parece nao fazer nada quando a janela foi minimizada em vez de escondida.
         if (AppWindow.Presenter is OverlappedPresenter presenter
@@ -78,23 +87,48 @@ public sealed partial class MainWindow : Window
         Activate();
     }
 
-    private void TrayExit_Click(object sender, RoutedEventArgs e)
+    private async void TrayExit_Click(object sender, RoutedEventArgs e)
     {
-        logger.Info("App.Tray.ExitClicked");
-        ExitApplication();
+        try { await ExitApplication(); }
+        catch (Exception exception) { logger.Error("App.Exit.Failed", exception); }
     }
 
-    public async void ExitApplication()
+    public Task ExitApplication()
     {
-        logger.Info("App.Exit.Requested");
+        if (exitTask is not null) return exitTask;
+        var completion = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        exitTask = completion.Task;
         IsShuttingDown = true;
-        if (RootFrame.Content is MainPage page)
-        {
-            await page.ShutdownAsync();
-        }
+        _ = ExitCoreAsync(completion);
+        return exitTask;
+    }
 
-        allowClose = true;
-        TrayIcon.Dispose();
-        Close();
+    private async Task ExitCoreAsync(TaskCompletionSource completion)
+    {
+        try
+        {
+            logger.Info("App.Exit.Requested");
+            if (RootFrame.Content is MainPage page)
+            {
+                try { await page.ShutdownAsync(); }
+                catch (Exception exception) { logger.Error("App.Shutdown.Failed", exception); }
+            }
+            allowClose = true;
+            DisposeTray();
+            Close();
+            completion.TrySetResult();
+        }
+        catch (Exception exception)
+        {
+            completion.TrySetException(exception);
+        }
+    }
+
+    private void DisposeTray()
+    {
+        if (trayDisposed) return;
+        trayDisposed = true;
+        try { TrayIcon.Dispose(); }
+        catch (Exception exception) { logger.Error("App.Tray.DisposeFailed", exception); }
     }
 }

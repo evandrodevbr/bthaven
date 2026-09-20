@@ -9,7 +9,10 @@ namespace BTHaven_App;
 
 public sealed partial class MainPage
 {
-    private async void InspectButton_Click(object sender, RoutedEventArgs e)
+    private void InspectButton_Click(object sender, RoutedEventArgs e) =>
+        _ = RunOperationAsync(InspectAsync);
+
+    private async Task InspectAsync()
     {
         logger.Info("App.InspectionButton.Clicked", new Dictionary<string, object?>
         {
@@ -72,7 +75,10 @@ public sealed partial class MainPage
         }
     }
 
-    private async void MediaToggleSwitch_Toggled(object sender, RoutedEventArgs e)
+    private void MediaToggleSwitch_Toggled(object sender, RoutedEventArgs e) =>
+        _ = RunOperationAsync(() => ToggleMediaAsync(sender));
+
+    private async Task ToggleMediaAsync(object sender)
     {
         if (suppressMediaToggleEvents
             || sender is not ToggleSwitch toggle
@@ -100,20 +106,14 @@ public sealed partial class MainPage
                 }
 
                 var targetId = matches[0].Id;
-                BindA2dpTarget(targetId, device.Id);
                 if (string.Equals(selectedDeviceId, device.Id, StringComparison.OrdinalIgnoreCase))
                 {
                     selectedA2dpDeviceId = targetId;
                 }
-                await autoReconnectService.DisableAsync();
-                var connected = await a2dpService.ConnectAsync(targetId, lifetime.Token);
+                var connected = await media.ConnectAsync(
+                    device.Id, targetId, AutoReconnectCheckBox.IsChecked == true, lifetime.Token);
                 if (connected)
                 {
-                    if (AutoReconnectCheckBox.IsChecked == true)
-                    {
-                        await autoReconnectService.EnableAsync(targetId, lifetime.Token);
-                    }
-                    activeMediaDeviceId = device.Id;
                     StatusInfoBar.Severity = InfoBarSeverity.Success;
                     StatusInfoBar.Message = $"Áudio A2DP ativo para {device.Name}. Reproduza mídia no telefone para exercitar o caminho.";
                 }
@@ -124,13 +124,9 @@ public sealed partial class MainPage
                     StatusInfoBar.Message = "O Windows não abriu a conexão A2DP; consulte Logs para o HRESULT.";
                 }
             }
-            else if (string.Equals(activeMediaDeviceId, device.Id, StringComparison.OrdinalIgnoreCase))
+            else if (string.Equals(media.ActiveDeviceId, device.Id, StringComparison.OrdinalIgnoreCase))
             {
-                ClearA2dpBindingsForLogicalDevice(device.Id);
-                InvalidateCurrentA2dpTarget();
-                await autoReconnectService.DisableAsync();
-                await a2dpService.DisconnectAsync(lifetime.Token);
-                activeMediaDeviceId = null;
+                await media.DisconnectAsync(device.Id, lifetime.Token);
                 StatusInfoBar.Severity = InfoBarSeverity.Informational;
                 StatusInfoBar.Message = "Áudio A2DP desativado.";
             }
@@ -155,7 +151,10 @@ public sealed partial class MainPage
         }
     }
 
-    private async void RemoteVolumeButton_Click(object sender, RoutedEventArgs e)
+    private void RemoteVolumeButton_Click(object sender, RoutedEventArgs e) =>
+        _ = RunOperationAsync(SetRemoteVolumeAsync);
+
+    private async Task SetRemoteVolumeAsync()
     {
         logger.Info("App.RemoteVolumeButton.Clicked", new Dictionary<string, object?>
         {

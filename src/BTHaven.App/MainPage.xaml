@@ -11,21 +11,33 @@
     <Page.Resources>
         <local:BoolToVisibilityConverter x:Key="BoolToVisibility" />
         <Style x:Key="SectionHeading" TargetType="TextBlock">
-            <Setter Property="FontSize" Value="16" />
+            <Setter Property="FontSize" Value="18" />
             <Setter Property="FontWeight" Value="SemiBold" />
-            <Setter Property="Margin" Value="0,12,0,2" />
+            <Setter Property="Margin" Value="0,0,0,4" />
             <Setter Property="AutomationProperties.HeadingLevel" Value="Level3" />
         </Style>
         <Style x:Key="CaptionText" TargetType="TextBlock">
-            <Setter Property="Opacity" Value="0.68" />
+            <Setter Property="Foreground" Value="{ThemeResource TextFillColorSecondaryBrush}" />
             <Setter Property="FontSize" Value="12" />
+            <Setter Property="TextWrapping" Value="Wrap" />
+        </Style>
+        <Style x:Key="SectionDivider" TargetType="Border">
+            <Setter Property="BorderBrush" Value="{ThemeResource DividerStrokeColorDefaultBrush}" />
+            <Setter Property="BorderThickness" Value="0,0,0,1" />
+            <Setter Property="Padding" Value="0,0,0,24" />
+            <Setter Property="Margin" Value="0,0,0,24" />
+            <Setter Property="HorizontalAlignment" Value="Stretch" />
+        </Style>
+        <Style x:Key="DetailRows" TargetType="Grid">
+            <Setter Property="RowSpacing" Value="12" />
+            <Setter Property="ColumnSpacing" Value="20" />
         </Style>
     </Page.Resources>
 
     <Grid x:Name="WorkspaceRoot"
-          Padding="28,20,28,28"
+          Padding="24,16,24,24"
           RowDefinitions="Auto,Auto,*"
-          RowSpacing="16">
+          RowSpacing="20">
         <VisualStateManager.VisualStateGroups>
             <VisualStateGroup x:Name="LayoutStates"
                               CurrentStateChanged="LayoutStates_CurrentStateChanged">
@@ -101,18 +113,23 @@
               ColumnDefinitions="*,Auto"
               RowDefinitions="Auto,Auto"
               ColumnSpacing="16">
-            <StackPanel Spacing="4" VerticalAlignment="Center">
-                <TextBlock Text="Bluetooth Hub"
-                           Style="{StaticResource TitleTextBlockStyle}"
-                           AutomationProperties.HeadingLevel="Level1" />
-                <TextBlock Text="Observações reais do Windows para Bluetooth Classic/LE, perfis, bateria e áudio"
-                           Opacity="0.72"
-                           TextWrapping="Wrap" />
-            </StackPanel>
+            <Grid ColumnDefinitions="Auto,*" ColumnSpacing="16" VerticalAlignment="Center">
+                <Image Source="Assets/Square44x44Logo.scale-200.png"
+                       Width="48" Height="48" AutomationProperties.AccessibilityView="Raw" />
+                <StackPanel Grid.Column="1" Spacing="4" VerticalAlignment="Center">
+                    <TextBlock Text="Bluetooth Hub"
+                               Style="{StaticResource TitleTextBlockStyle}"
+                               AutomationProperties.HeadingLevel="Level1" />
+                    <TextBlock Text="Dispositivos, bateria e áudio em um só lugar."
+                               Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                               TextWrapping="Wrap" />
+                </StackPanel>
+            </Grid>
             <CommandBar x:Name="GlobalCommandBar"
                         Grid.Column="1"
                         DefaultLabelPosition="Right"
-                        IsDynamicOverflowEnabled="True">
+                        IsDynamicOverflowEnabled="True"
+                        Background="Transparent">
                 <AppBarButton x:Name="LogsButton"
                               Label="Logs"
                               Click="LogsButton_Click"
@@ -150,12 +167,12 @@
             <Border x:Name="DevicePane"
                     Grid.Column="0"
                     Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
-                    BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
-                    BorderThickness="1"
-                    CornerRadius="12">
+                BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
+                BorderThickness="1"
+                CornerRadius="8">
                 <Grid RowDefinitions="Auto,Auto,*">
                     <Grid x:Name="DevicePaneHeader"
-                          Padding="18,16,18,8"
+                      Padding="20,20,20,12"
                           ColumnDefinitions="*,Auto">
                         <TextBlock Text="Dispositivos"
                                    FontSize="18"
@@ -168,7 +185,7 @@
                     </Grid>
                     <Grid x:Name="DeviceFilterHeader"
                           Grid.Row="1"
-                          Padding="12,0,8,10"
+                      Padding="16,0,16,16"
                           ColumnDefinitions="*,Auto"
                           ColumnSpacing="8">
                         <ComboBox x:Name="FilterComboBox"
@@ -186,6 +203,7 @@
                             <ComboBoxItem Content="Periféricos" Tag="Peripherals" />
                         </ComboBox>
                         <AppBarButton x:Name="RefreshButton"
+                                  ToolTipService.ToolTip="Atualizar dispositivos (F5)"
                                       Grid.Column="1"
                                       Icon="Refresh"
                                       Label="Atualizar"
@@ -199,45 +217,64 @@
                     </Grid>
                     <Grid Grid.Row="2">
                         <ListView x:Name="DeviceList"
-                                  Margin="6,0,6,6"
+                          Margin="8,0,8,8"
                                   SelectionMode="Single"
                                   SelectionChanged="DeviceList_SelectionChanged"
                                   AutomationProperties.Name="Dispositivos Bluetooth">
+                    <ListView.ItemContainerStyle>
+                        <Style TargetType="ListViewItem">
+                            <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+                            <Setter Property="Padding" Value="0" />
+                            <Setter Property="Margin" Value="0,0,0,4" />
+                            <Setter Property="CornerRadius" Value="6" />
+                        </Style>
+                    </ListView.ItemContainerStyle>
                             <ListView.ItemTemplate>
                                 <DataTemplate>
-                                    <Grid Padding="10"
-                                          ColumnDefinitions="38,*,Auto,Auto"
-                                          ColumnSpacing="10"
-                                          AutomationProperties.Name="{Binding TelemetryAutomationText}">
-                                        <FontIcon Glyph="{Binding IconGlyph}" FontSize="22" VerticalAlignment="Center" />
-                                        <StackPanel Grid.Column="1" Spacing="2" VerticalAlignment="Center">
-                                            <TextBlock Text="{Binding Name}" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" />
-                                            <TextBlock Text="{Binding Summary}" Style="{StaticResource CaptionText}" TextTrimming="CharacterEllipsis" />
-                                            <TextBlock Text="{Binding StatusText}"
-                                                       FontSize="12"
-                                                       Foreground="{ThemeResource TextFillColorSecondaryBrush}"
-                                                       Visibility="{Binding IsConnected, Converter={StaticResource BoolToVisibility}, ConverterParameter=invert}" />
-                                            <TextBlock Text="{Binding StatusText}"
-                                                       FontSize="12"
-                                                       Foreground="{ThemeResource SystemFillColorSuccessBrush}"
-                                                       Visibility="{Binding IsConnected, Converter={StaticResource BoolToVisibility}}" />
-                                            <TextBlock Text="{Binding TelemetryText}" FontSize="11" Opacity="0.72" TextTrimming="CharacterEllipsis" />
-                                        </StackPanel>
-                                        <TextBlock Grid.Column="2"
-                                                   Text="{Binding BatteryText}"
-                                                   Style="{StaticResource CaptionText}"
-                                                   MaxWidth="120"
-                                                   TextTrimming="CharacterEllipsis"
-                                                   ToolTipService.ToolTip="{Binding BatteryText}"
-                                                   VerticalAlignment="Center" />
-                                        <ToggleSwitch Grid.Column="3"
-                                                      Tag="{Binding Id}"
-                                                      IsOn="{Binding MediaEnabled}"
-                                                      IsEnabled="{Binding MediaToggleEnabled}"
-                                                      Toggled="MediaToggleSwitch_Toggled"
-                                                      OnContent=""
-                                                      OffContent=""
-                                                      AutomationProperties.Name="{Binding MediaAutomationName}" />
+                            <Grid Padding="12"
+                                  ColumnDefinitions="40,*"
+                                  RowDefinitions="Auto,Auto"
+                                  ColumnSpacing="12"
+                                  RowSpacing="10"
+                                  AutomationProperties.Name="{Binding TelemetryAutomationText}">
+                                <Border Width="40" Height="40"
+                                        CornerRadius="8"
+                                        Background="{ThemeResource SubtleFillColorSecondaryBrush}"
+                                        VerticalAlignment="Top">
+                                    <FontIcon Glyph="{Binding IconGlyph}" FontSize="20" />
+                                </Border>
+                                <StackPanel Grid.Column="1" Spacing="3">
+                                    <TextBlock Text="{Binding Name}" FontWeight="SemiBold"
+                                               TextTrimming="CharacterEllipsis"
+                                               ToolTipService.ToolTip="{Binding Name}" />
+                                    <TextBlock Text="{Binding Summary}" Style="{StaticResource CaptionText}"
+                                               MaxLines="2" TextTrimming="CharacterEllipsis" />
+                                    <TextBlock Text="{Binding StatusText}"
+                                               FontSize="12"
+                                               Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                               Visibility="{Binding IsConnected, Converter={StaticResource BoolToVisibility}, ConverterParameter=invert}" />
+                                    <TextBlock Text="{Binding StatusText}"
+                                               FontSize="12"
+                                               Foreground="{ThemeResource SystemFillColorSuccessBrush}"
+                                               Visibility="{Binding IsConnected, Converter={StaticResource BoolToVisibility}}" />
+                                </StackPanel>
+                                <Grid Grid.Row="1" Grid.ColumnSpan="2"
+                                      ColumnDefinitions="*,Auto" ColumnSpacing="8">
+                                    <StackPanel Spacing="2" VerticalAlignment="Center">
+                                        <TextBlock Text="{Binding BatteryText}" Style="{StaticResource CaptionText}"
+                                                   TextTrimming="CharacterEllipsis" MaxLines="1"
+                                                   ToolTipService.ToolTip="{Binding BatteryText}" />
+                                        <TextBlock Text="{Binding TelemetryText}" Style="{StaticResource CaptionText}"
+                                                   TextTrimming="CharacterEllipsis" MaxLines="1"
+                                                   ToolTipService.ToolTip="{Binding TelemetryText}" />
+                                    </StackPanel>
+                                    <ToggleSwitch Grid.Column="1" Tag="{Binding}"
+                                                  IsOn="{Binding MediaEnabled}"
+                                                  IsEnabled="{Binding MediaToggleEnabled}"
+                                                  Toggled="MediaToggleSwitch_Toggled"
+                                                  OnContent="Áudio ativo" OffContent="Áudio"
+                                                  AutomationProperties.Name="{Binding MediaAutomationName}" />
+                                </Grid>
                                     </Grid>
                                 </DataTemplate>
                             </ListView.ItemTemplate>
@@ -268,11 +305,11 @@
                     Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
                     BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
                     BorderThickness="1"
-                    CornerRadius="12">
+                CornerRadius="8">
                 <Grid RowDefinitions="Auto,Auto,*">
                     <StackPanel x:Name="SelectedDeviceHeader"
-                                Padding="24,20,24,8"
-                                Spacing="6">
+                            Padding="24,24,24,16"
+                            Spacing="12">
                         <Button x:Name="CompactBackButton"
                                 Visibility="Collapsed"
                                 Click="CompactBackButton_Click"
@@ -298,13 +335,13 @@
                                        TextTrimming="CharacterEllipsis" />
                         </ContentControl>
                         <TextBlock x:Name="SelectedDeviceSubtitle"
-                                   Text="A lista usa observações do Windows, sem polling agressivo."
-                                   Opacity="0.72"
+                                   Text="Escolha um dispositivo na lista para consultar seus detalhes e controles de áudio."
+                                   Foreground="{ThemeResource TextFillColorSecondaryBrush}"
                                    TextWrapping="Wrap" />
-                        <Grid ColumnDefinitions="Auto,*"
+                        <Grid x:Name="SelectedDeviceStatus" Visibility="Collapsed" ColumnDefinitions="Auto,*"
                               RowDefinitions="Auto,Auto"
-                              ColumnSpacing="8"
-                              RowSpacing="4">
+                              ColumnSpacing="16"
+                              RowSpacing="8">
                             <TextBlock Text="Estado"
                                        Style="{StaticResource CaptionText}"
                                        VerticalAlignment="Center" />
@@ -328,7 +365,8 @@
 
                     <SelectorBar x:Name="DetailSelectorBar"
                                  Grid.Row="1"
-                                 Margin="16,0,16,4"
+                                 Visibility="Collapsed"
+                             Margin="16,0,16,0"
                                  SelectionChanged="DetailSelectorBar_SelectionChanged"
                                  AutomationProperties.Name="Informações do dispositivo selecionado">
                         <SelectorBarItem x:Name="SummarySelectorItem" Text="Resumo" />
@@ -336,15 +374,30 @@
                         <SelectorBarItem x:Name="DiagnosticsSelectorItem" Text="Diagnóstico" />
                     </SelectorBar>
 
-                    <Grid Grid.Row="2">
+                    <StackPanel x:Name="SelectionEmptyState" Grid.Row="2"
+                                MaxWidth="360" Margin="32"
+                                HorizontalAlignment="Center" VerticalAlignment="Center"
+                                Spacing="16">
+                        <FontIcon Glyph="&#xE702;" FontSize="40"
+                                  Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                        <TextBlock Text="Seu Bluetooth, organizado"
+                                   FontSize="20" FontWeight="SemiBold"
+                                   TextAlignment="Center" TextWrapping="Wrap" />
+                        <TextBlock Text="Selecione um dispositivo para ver a conexão, consultar a bateria e acessar os controles disponíveis."
+                                   TextAlignment="Center" TextWrapping="Wrap"
+                                   Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                    </StackPanel>
+                    <Grid x:Name="DeviceDetailContent" Grid.Row="2" Visibility="Collapsed">
                         <ScrollViewer x:Name="SummaryView"
                                       VerticalScrollBarVisibility="Auto"
                                       HorizontalScrollBarVisibility="Disabled">
                             <StackPanel x:Name="SummaryContent"
-                                        Padding="24,8,24,24"
-                                        Spacing="8">
+                                Padding="24"
+                                Spacing="0">
+                        <Border Style="{StaticResource SectionDivider}">
+                            <StackPanel Spacing="12">
                                 <TextBlock Text="Conexão" Style="{StaticResource SectionHeading}" />
-                                <Grid ColumnDefinitions="160,*" RowDefinitions="Auto,Auto,Auto,Auto,Auto" RowSpacing="6">
+                        <Grid ColumnDefinitions="160,*" RowDefinitions="Auto,Auto,Auto,Auto,Auto" Style="{StaticResource DetailRows}">
                                     <TextBlock Text="Transporte agregado" Style="{StaticResource CaptionText}" />
                                     <TextBlock x:Name="TransportText" Grid.Column="1" Text="—" TextWrapping="Wrap" />
                                     <TextBlock Grid.Row="1" Text="RSSI" Style="{StaticResource CaptionText}" />
@@ -356,9 +409,13 @@
                                     <TextBlock Grid.Row="4" Text="ContainerId" Style="{StaticResource CaptionText}" />
                                     <TextBlock x:Name="ContainerIdText" Grid.Row="4" Grid.Column="1" Text="—" TextWrapping="Wrap" />
                                 </Grid>
+                            </StackPanel>
+                        </Border>
+                        <Border Style="{StaticResource SectionDivider}">
+                            <StackPanel Spacing="12">
 
                                 <TextBlock Text="Bateria" Style="{StaticResource SectionHeading}" />
-                                <Grid ColumnDefinitions="160,*" RowDefinitions="Auto,Auto,Auto,Auto,Auto" RowSpacing="6">
+                        <Grid ColumnDefinitions="160,*" RowDefinitions="Auto,Auto,Auto,Auto,Auto" Style="{StaticResource DetailRows}">
                                     <TextBlock Text="Estado" Style="{StaticResource CaptionText}" />
                                     <TextBlock x:Name="BatteryText" Grid.Column="1" Text="—" TextWrapping="Wrap" />
                                     <TextBlock Grid.Row="1" Text="Consulta" Style="{StaticResource CaptionText}" />
@@ -370,9 +427,13 @@
                                     <TextBlock Grid.Row="4" Text="Observação" Style="{StaticResource CaptionText}" />
                                     <TextBlock x:Name="BatteryObservedText" Grid.Row="4" Grid.Column="1" Text="—" TextWrapping="Wrap" />
                                 </Grid>
+                            </StackPanel>
+                        </Border>
+                        <StackPanel Spacing="12">
 
                                 <TextBlock Text="Capacidades observadas" Style="{StaticResource SectionHeading}" />
                                 <TextBlock x:Name="CapabilitiesText" Text="—" TextWrapping="Wrap" />
+                        </StackPanel>
                             </StackPanel>
                         </ScrollViewer>
 
@@ -381,12 +442,14 @@
                                       VerticalScrollBarVisibility="Auto"
                                       HorizontalScrollBarVisibility="Disabled">
                             <StackPanel x:Name="AudioContent"
-                                        Padding="24,8,24,24"
-                                        Spacing="8">
+                                Padding="24"
+                                Spacing="0">
+                        <Border Style="{StaticResource SectionDivider}">
+                            <StackPanel Spacing="12">
                                 <TextBlock Text="Áudio de mídia" Style="{StaticResource SectionHeading}" />
                                 <TextBlock Text="O Windows pode transformar o PC em um destino A2DP usando AudioPlaybackConnection. O telefone precisa enviar a mídia para o PC; o Windows reproduz no endpoint padrão."
                                            TextWrapping="Wrap"
-                                           Opacity="0.72" />
+                                   Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
                                 <TextBlock x:Name="A2dpTargetText"
                                            Text="Alvo A2DP: aguardando seleção"
                                            TextWrapping="Wrap"
@@ -395,7 +458,8 @@
                                         Content="Ativar áudio do smartphone"
                                         Click="MediaAudioButton_Click"
                                         IsEnabled="False"
-                                        HorizontalAlignment="Left" />
+                                        HorizontalAlignment="Left"
+                                        Style="{StaticResource AccentButtonStyle}" />
                                 <CheckBox x:Name="AutoReconnectCheckBox"
                                           Content="Reconectar áudio automaticamente"
                                           IsChecked="True"
@@ -409,10 +473,14 @@
                                            TextWrapping="Wrap"
                                            Style="{StaticResource CaptionText}" />
 
+                            </StackPanel>
+                        </Border>
+                        <Border Style="{StaticResource SectionDivider}">
+                            <StackPanel Spacing="12">
                                 <TextBlock Text="Volume remoto do smartphone" Style="{StaticResource SectionHeading}" />
                                 <TextBlock Text="O aplicativo ajusta o volume do telefone somente quando o Windows expõe uma rota oficial de controle AVRCP para este dispositivo."
                                            TextWrapping="Wrap"
-                                           Opacity="0.72" />
+                                   Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
                                 <InfoBar x:Name="RemoteVolumeInfoBar"
                                          IsOpen="True"
                                          Severity="Informational"
@@ -435,6 +503,9 @@
                                         Click="RemoteVolumeButton_Click"
                                         IsEnabled="False"
                                         HorizontalAlignment="Left" />
+                            </StackPanel>
+                        </Border>
+                        <StackPanel Spacing="12">
 
                                 <TextBlock Text="Chamadas" Style="{StaticResource SectionHeading}" />
                                 <InfoBar x:Name="HfpStatusInfoBar"
@@ -455,6 +526,7 @@
                                 <TextBlock Text="O Windows pode negar o acesso porque PhoneLineTransportManagement é uma capability restrita. O aplicativo registra a resposta e não simula áudio de chamadas."
                                            TextWrapping="Wrap"
                                            Style="{StaticResource CaptionText}" />
+                        </StackPanel>
                             </StackPanel>
                         </ScrollViewer>
 
@@ -463,8 +535,8 @@
                                       VerticalScrollBarVisibility="Auto"
                                       HorizontalScrollBarVisibility="Disabled">
                             <StackPanel x:Name="DiagnosticsContent"
-                                        Padding="24,8,24,24"
-                                        Spacing="8">
+                                        Padding="24"
+                                        Spacing="16">
                                 <TextBlock Text="Inspeção detalhada" Style="{StaticResource SectionHeading}" />
                                 <Grid ColumnDefinitions="Auto,*" ColumnSpacing="10">
                                     <Button x:Name="InspectButton"
@@ -483,8 +555,8 @@
                                          IsReadOnly="True"
                                          AcceptsReturn="True"
                                          TextWrapping="Wrap"
-                                         MinHeight="220"
-                                         MaxHeight="480"
+                                         MinHeight="280"
+                                         FontSize="12"
                                          FontFamily="Cascadia Mono" />
                             </StackPanel>
                         </ScrollViewer>
