@@ -4,6 +4,30 @@ namespace BTHaven.Core.Tests;
 
 public sealed class BluetoothDeviceIdentityTests
 {
+    [Theory]
+    [InlineData("unknown")]
+    [InlineData("GG:11:22:33:44:55")]
+    [InlineData("80:54:2D:51:3B")]
+    [InlineData("80:54:2D:51:3B:D6:AA")]
+    [InlineData("80/54/2D/51/3B/D6")]
+    public void Invalid_addresses_fall_back_to_distinct_endpoint_identities(string address)
+    {
+        var first = Observation("endpoint-a", null, address, BluetoothTransport.Classic);
+        var second = first with { Id = "endpoint-b" };
+
+        Assert.Empty(BluetoothDeviceIdentity.NormalizeAddress(address));
+        Assert.Equal("endpoint:Classic:endpoint-a", BluetoothDeviceIdentity.GetLogicalId(first));
+        Assert.NotEqual(BluetoothDeviceIdentity.GetLogicalId(first), BluetoothDeviceIdentity.GetLogicalId(second));
+    }
+
+    [Theory]
+    [InlineData("80542d513bd6")]
+    [InlineData(" 80:54:2D:51:3B:D6 ")]
+    public void Valid_addresses_keep_the_same_identity(string address)
+    {
+        Assert.Equal("80542D513BD6", BluetoothDeviceIdentity.NormalizeAddress(address));
+    }
+
     [Fact]
     public void Container_id_has_priority_over_address_and_endpoint_id()
     {

@@ -49,7 +49,11 @@ public static class BluetoothDeviceIdentity
             return string.Empty;
         }
 
-        return string.Concat(address.Where(char.IsAsciiLetterOrDigit)).ToUpperInvariant();
+        var normalized = address.Trim().Replace(":", string.Empty).Replace("-", string.Empty);
+        // A malformed property must not collapse unrelated endpoints into one device.
+        return normalized.Length == 12 && normalized.All(char.IsAsciiHexDigit)
+            ? normalized.ToUpperInvariant()
+            : string.Empty;
     }
 
     private static string NormalizeIdentifier(string? identifier) =>

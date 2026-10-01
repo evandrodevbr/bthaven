@@ -348,3 +348,9 @@ Contributions touching Windows Bluetooth roles, capabilities, audio transports, 
 ## License
 
 MIT. See [`LICENSE`](LICENSE).
+
+## Review validation (2026-09-30)
+
+Bluetooth address identity accepts exactly 12 hexadecimal digits, with optional colon or hyphen separators. Invalid address properties fall back to the endpoint identity, so unrelated devices with the same malformed property are kept separate. Container IDs retain precedence.
+
+The cross-platform Core suite passes 48 tests on Linux x64 with .NET SDK 10.0.401. Run `dotnet test tests/BTHaven.Core.Tests/BTHaven.Core.Tests.csproj -c Release`. This covers identity and domain logic; WinUI, Windows adapters, audio routing and Bluetooth hardware still require the Windows checks documented above.
